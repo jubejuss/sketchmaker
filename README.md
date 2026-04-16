@@ -8,7 +8,7 @@ No layout templates — every pixel spec is authored by Claude per brand.
 
 ## Stack
 
-- **Electron 33** (`electron-vite`, ESM) + **React 18** + TypeScript + Zustand
+- **Electron 33** (`electron-vite`, ESM) + **React 19** + TypeScript + Zustand
 - **Playwright-core** — scraping (Chromium auto-installs to userData on first run)
 - **node-vibrant** — colour extraction
 - **Anthropic SDK** (`claude-sonnet-4-6`, streaming)
@@ -137,12 +137,22 @@ interface VisualElement {
 ### UX
 - Preview moodboards inline (React canvas/SVG renderer of the same DSL) before pushing to Figma — lets designers iterate on prompts without touching Figma.
 - Diff view between directions.
+- Migrate form submissions (`InputView`, `SettingsView`) to React 19 `<form action>` + `useActionState` for cleaner pending/error states.
+- Use React 19's `use()` hook to read streaming synthesis tokens directly in render, replacing the manual `useState` + `onSynthesisToken` wiring.
 
 ## Contributing
 
 - `npx tsc --noEmit` must pass.
 - Keep the renderer dumb: never hardcode design decisions in `figma-script.ts`. If you need new visual capabilities, extend the DSL in `src/shared/types.ts` first, then implement interpretation, then instruct Claude in the synthesis prompt.
 - Prompt rules that work live in the repo's auto-memory / CLAUDE.md. Update them when behaviour changes.
+
+### React 19 conventions
+
+- Use `ref` as a regular prop — do not wrap components in `React.forwardRef`.
+- Prefer the `use()` hook for consuming promises/context in render paths.
+- No `defaultProps` on function components (removed in 19). Use parameter defaults.
+- No string refs, `PropTypes`, or legacy context — all removed in 19.
+- `ReactDOM.createRoot` is already in `src/renderer/main.tsx` — don't introduce `ReactDOM.render`.
 
 ## Licence
 

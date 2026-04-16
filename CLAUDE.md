@@ -13,7 +13,7 @@ Desktop tool for designers. Given a client website URL or creative brief, it:
 ## Tech Stack
 
 - **Electron 33** + `electron-vite` (ESM, `"type": "module"` in package.json)
-- **React 18** + TypeScript + Tailwind CSS 3
+- **React 19** + TypeScript + Tailwind CSS 3 (ref-as-prop, no forwardRef)
 - **Zustand** for state
 - **Playwright-core** for website scraping (Chromium auto-installs on first run to userData)
 - **node-vibrant** for color extraction from screenshots
