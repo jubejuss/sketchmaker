@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { jsonrepair } from 'jsonrepair'
 import type { SynthesisContext, SynthesisResult, CompetitorScope } from '../../shared/types.js'
 
 type RetryCallbacks = {
@@ -328,9 +329,30 @@ function parseResult(text: string): SynthesisResult {
     throw new Error('Claude did not return valid JSON in <json> tags')
   }
 
+  const raw = match[1].trim()
+
   try {
-    return JSON.parse(match[1].trim()) as SynthesisResult
-  } catch (err) {
-    throw new Error(`Failed to parse synthesis JSON: ${err}`)
+    return JSON.parse(raw) as SynthesisResult
+  } catch (strictErr) {
+    console.warn('[synthesize] strict JSON.parse failed, attempting jsonrepair:', (strictErr as Error).message)
+    dumpParseContext(raw, strictErr as Error)
+    try {
+      const repaired = jsonrepair(raw)
+      const result = JSON.parse(repaired) as SynthesisResult
+      console.log('[synthesize] jsonrepair succeeded — parse recovered')
+      return result
+    } catch (repairErr) {
+      throw new Error(`Failed to parse synthesis JSON (even after repair): ${repairErr}`)
+    }
   }
+}
+
+function dumpParseContext(raw: string, err: Error): void {
+  const posMatch = err.message.match(/position (\d+)/)
+  if (!posMatch) return
+  const pos = parseInt(posMatch[1], 10)
+  const start = Math.max(0, pos - 120)
+  const end = Math.min(raw.length, pos + 120)
+  console.warn('[synthesize] context around parse error:')
+  console.warn(raw.slice(start, pos) + '<<<HERE>>>' + raw.slice(pos, end))
 }
