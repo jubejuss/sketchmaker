@@ -448,39 +448,42 @@ function UrlInput({
   )
 }
 
-const BriefInput = React.forwardRef<
-  HTMLTextAreaElement,
-  { value: string; onChange: (v: string) => void; compact?: boolean }
->(({ value, onChange, compact }, ref) => (
-  <textarea
-    ref={ref}
-    value={value}
-    onChange={(e) => onChange(e.target.value)}
-    placeholder={compact
-      ? 'Kirjelda projekti eesmärki, sihtrühma, soovitud tunnet...'
-      : 'Kirjelda projekti: mis on kliendi tegevusala, kes on sihtgrupp, millist tunnet soovid edasi anda, milliseid märksõnu tuleks arvestada...'
-    }
-    rows={compact ? 3 : 7}
-    style={{
-      width: '100%',
-      padding: '14px 16px',
-      background: 'var(--bg-card)',
-      border: '1px solid var(--border)',
-      borderRadius: 10,
-      color: 'var(--text-primary)',
-      fontFamily: 'var(--sans)',
-      fontSize: 14,
-      lineHeight: 1.6,
-      outline: 'none',
-      resize: 'vertical',
-      transition: 'border-color 0.15s ease',
-      WebkitUserSelect: 'text' as never
-    }}
-    onFocus={(e) => (e.target.style.borderColor = 'var(--border-active)')}
-    onBlur={(e) => (e.target.style.borderColor = 'var(--border)')}
-  />
-))
-BriefInput.displayName = 'BriefInput'
+function BriefInput({ value, onChange, compact, ref }: {
+  value: string
+  onChange: (v: string) => void
+  compact?: boolean
+  ref?: React.Ref<HTMLTextAreaElement>
+}): React.ReactElement {
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={compact
+        ? 'Kirjelda projekti eesmärki, sihtrühma, soovitud tunnet...'
+        : 'Kirjelda projekti: mis on kliendi tegevusala, kes on sihtgrupp, millist tunnet soovid edasi anda, milliseid märksõnu tuleks arvestada...'
+      }
+      rows={compact ? 3 : 7}
+      style={{
+        width: '100%',
+        padding: '14px 16px',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+        color: 'var(--text-primary)',
+        fontFamily: 'var(--sans)',
+        fontSize: 14,
+        lineHeight: 1.6,
+        outline: 'none',
+        resize: 'vertical',
+        transition: 'border-color 0.15s ease',
+        WebkitUserSelect: 'text' as never
+      }}
+      onFocus={(e) => (e.target.style.borderColor = 'var(--border-active)')}
+      onBlur={(e) => (e.target.style.borderColor = 'var(--border)')}
+    />
+  )
+}
 
 function CompetitorScopeSelector({
   value,
