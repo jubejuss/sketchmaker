@@ -1,13 +1,9 @@
-import type { DirectionSpec, VisualElement } from '../../shared/types.js'
+import type { DirectionSpec, ImageSource, VisualElement } from '../../shared/types.js'
+import { pickOrientation, searchPexelsImage } from './pexels.js'
 
-// OpenAI Images API — model `gpt-image-1`. Returns b64 PNG by default.
-// We upload to a data URL so figma.createImageAsync() can fetch it, but the
-// Figma plugin supports data URLs directly.
-
-export interface GeneratedImage {
-  imagePrompt: string
-  imageUrl: string  // data URL or https URL
-  imageHash?: string
+export interface ImageProviderKeys {
+  openaiApiKey: string
+  pexelsApiKey: string
 }
 
 type ImageSize = '1024x1024' | '1536x1024' | '1024x1536'
@@ -19,31 +15,33 @@ interface ImagePromptRef {
 }
 
 export async function generateImagesForDirections(
-  openaiApiKey: string,
+  source: ImageSource,
+  keys: ImageProviderKeys,
   directions: DirectionSpec[],
   onProgress?: (done: number, total: number, label?: string) => void
-): Promise<{ generated: number; failed: number }> {
-  if (!openaiApiKey) return { generated: 0, failed: 0 }
-
+): Promise<{ generated: number; failed: number; source: ImageSource }> {
   const refs: ImagePromptRef[] = []
   for (const dir of directions) {
     for (const section of dir.sections ?? []) {
       walkElements(section.elements, (el) => {
         if (el.kind === 'image' && el.imagePrompt && !el.imageUrl) {
-          refs.push({ element: el, prompt: enrichPrompt(el.imagePrompt, dir), size: pickSize(el.w, el.h) })
+          refs.push({ element: el, prompt: enrichPrompt(el.imagePrompt, dir, source), size: pickSize(el.w, el.h) })
         }
       })
     }
   }
 
   const total = refs.length
-  if (total === 0) return { generated: 0, failed: 0 }
+  if (total === 0) return { generated: 0, failed: 0, source }
+
+  const activeKey = source === 'pexels' ? keys.pexelsApiKey : keys.openaiApiKey
+  if (!activeKey) return { generated: 0, failed: 0, source }
 
   let done = 0
   let failed = 0
-  onProgress?.(0, total, 'Alustan piltide genereerimist')
+  onProgress?.(0, total, `Alustan piltide otsingut (${source})`)
 
-  // gpt-image-1 tier-1 limit is higher than DALL·E 3, but keep concurrency moderate to avoid 429s.
+  // Pexels has a higher rate budget (200/hr), OpenAI is cost-sensitive — both can handle 3 parallel.
   const CONCURRENCY = 3
   const queue = [...refs]
   await Promise.all(
@@ -51,12 +49,17 @@ export async function generateImagesForDirections(
       while (queue.length > 0) {
         const ref = queue.shift()!
         try {
-          const dataUrl = await generateImage(openaiApiKey, ref.prompt, ref.size)
-          ref.element.imageUrl = dataUrl
-          ref.element.imageHash = hashString(ref.prompt)
+          const url = source === 'pexels'
+            ? await fetchPexels(keys.pexelsApiKey, ref)
+            : await fetchOpenAI(keys.openaiApiKey, ref)
+          if (url) {
+            ref.element.imageUrl = url
+          } else {
+            failed++
+          }
         } catch (err) {
           failed++
-          console.error('[image-gen] failed:', (err as Error).message, 'prompt:', ref.prompt.slice(0, 80))
+          console.error(`[image-gen:${source}] failed:`, (err as Error).message, 'prompt:', ref.prompt.slice(0, 80))
         }
         done++
         onProgress?.(done, total, `${done}/${total}`)
@@ -64,36 +67,15 @@ export async function generateImagesForDirections(
     })
   )
 
-  return { generated: total - failed, failed }
+  return { generated: total - failed, failed, source }
 }
 
-function walkElements(elements: VisualElement[] | undefined, visit: (el: VisualElement) => void): void {
-  if (!elements) return
-  for (const el of elements) {
-    visit(el)
-    if (el.children) walkElements(el.children, visit)
-  }
+async function fetchPexels(apiKey: string, ref: ImagePromptRef): Promise<string | null> {
+  const orientation = pickOrientation(ref.element.w, ref.element.h)
+  return searchPexelsImage(apiKey, ref.prompt, orientation, hashString(ref.prompt))
 }
 
-function pickSize(w?: number, h?: number): ImageSize {
-  if (!w || !h) return '1024x1024'
-  const ratio = w / h
-  if (ratio > 1.3) return '1536x1024'
-  if (ratio < 0.77) return '1024x1536'
-  return '1024x1024'
-}
-
-function enrichPrompt(raw: string, dir: DirectionSpec): string {
-  const palette = dir.palette.slice(0, 3).join(', ')
-  const mood = dir.mood.slice(0, 3).join(', ')
-  return `${raw}\n\nArt direction: ${dir.concept}\nPalette cues: ${palette}\nMood: ${mood}\nStyle: editorial, high quality, no text overlays, no watermarks.`
-}
-
-async function generateImage(
-  apiKey: string,
-  prompt: string,
-  size: ImageSize
-): Promise<string> {
+async function fetchOpenAI(apiKey: string, ref: ImagePromptRef): Promise<string | null> {
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: {
@@ -102,8 +84,8 @@ async function generateImage(
     },
     body: JSON.stringify({
       model: 'gpt-image-1',
-      prompt: prompt.slice(0, 4000),
-      size,
+      prompt: ref.prompt.slice(0, 4000),
+      size: ref.size,
       quality: 'medium',
       n: 1
     })
@@ -122,10 +104,36 @@ async function generateImage(
   throw new Error('OpenAI response missing image')
 }
 
-function hashString(s: string): string {
+function walkElements(elements: VisualElement[] | undefined, visit: (el: VisualElement) => void): void {
+  if (!elements) return
+  for (const el of elements) {
+    visit(el)
+    if (el.children) walkElements(el.children, visit)
+  }
+}
+
+function pickSize(w?: number, h?: number): ImageSize {
+  if (!w || !h) return '1024x1024'
+  const ratio = w / h
+  if (ratio > 1.3) return '1536x1024'
+  if (ratio < 0.77) return '1024x1536'
+  return '1024x1024'
+}
+
+// For OpenAI we add rich art-direction context; for Pexels we keep the query
+// short because the search engine responds better to concrete keywords than
+// stylistic phrasing.
+function enrichPrompt(raw: string, dir: DirectionSpec, source: ImageSource): string {
+  if (source === 'pexels') return raw
+  const palette = dir.palette.slice(0, 3).join(', ')
+  const mood = dir.mood.slice(0, 3).join(', ')
+  return `${raw}\n\nArt direction: ${dir.concept}\nPalette cues: ${palette}\nMood: ${mood}\nStyle: editorial, high quality, no text overlays, no watermarks.`
+}
+
+function hashString(s: string): number {
   let h = 0
   for (let i = 0; i < s.length; i++) {
     h = ((h << 5) - h + s.charCodeAt(i)) | 0
   }
-  return Math.abs(h).toString(36)
+  return h
 }

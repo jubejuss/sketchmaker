@@ -39,6 +39,10 @@ body {
   color: var(--text-primary);
   font-family: var(--sans);
   overflow: hidden;
+  user-select: text;
+}
+
+button, .titlebar-drag {
   user-select: none;
 }
 

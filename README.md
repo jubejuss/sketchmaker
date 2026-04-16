@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/jubejuss/sketchmaker
 
-Desktop moodboard generator for designers. Point it at a client URL (or paste a brief), it scrapes the site, analyses competitors, runs a single Claude call that outputs three radically different visual directions as a bespoke element-level DSL, generates images with OpenAI's `gpt-image-1`, then renders everything live into Figma or Pencil (Paper) via MCP.
+Desktop moodboard generator for designers. Point it at a client URL (or paste a brief), it scrapes the site, analyses competitors, runs a single Claude call that outputs three radically different visual directions as a bespoke element-level DSL, fills the image placeholders from either **Pexels** (stock photos, default) or **OpenAI `gpt-image-1`** (AI-generated), then renders everything live into Figma or Pencil (Paper) via MCP.
 
 No layout templates — every pixel spec is authored by Claude per brand.
 
@@ -12,7 +12,8 @@ No layout templates — every pixel spec is authored by Claude per brand.
 - **Playwright-core** — scraping (Chromium auto-installs to userData on first run)
 - **node-vibrant** — colour extraction
 - **Anthropic SDK** (`claude-sonnet-4-6`, streaming) + **jsonrepair** fallback for malformed synthesis JSON
-- **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — in-scene moodboard imagery
+- **Pexels API v1** — default image source, stock photography, 200 req/hr free
+- **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — optional AI-generated imagery
 - **MCP**: `figma-console-mcp` (Figma Desktop Bridge plugin, CDP :9222 + WS :9225) and Paper MCP binary
 - **electron-store** — encrypted settings persistence
 
@@ -40,9 +41,12 @@ All keys are configured in the app's **Seaded** (Settings) view — not in env v
 | Key | Source | Required for |
 |-----|--------|--------------|
 | `anthropicApiKey` | platform.claude.com → API Keys (`sk-ant-api03-…`) | **Mandatory** — synthesis, SEO/WCAG, competitor discovery |
-| `openaiApiKey` | platform.openai.com → API keys (`sk-proj-…` or `sk-…`) | Optional — `gpt-image-1` image generation. Without it, moodboards render with tinted placeholder rects instead of photos. Your OpenAI **org** must be verified AND your **project** must list `gpt-image-1` under Settings → Project → Limits → Allowed models |
+| `pexelsApiKey` | pexels.com/api/new | Required if **Image source = Pexels** (default). 200 req/hr free. |
+| `openaiApiKey` | platform.openai.com → API keys (`sk-proj-…` or `sk-…`) | Required if **Image source = OpenAI** (`gpt-image-1`). Your OpenAI **org** must be verified AND your **project** must list `gpt-image-1` under Settings → Project → Limits → Allowed models |
 | `ahrefsApiKey` | app.ahrefs.com → Account → API | Optional — organic SEO competitors. Without it that step is skipped |
 | `figmaAccessToken` | figma.com → Settings → Security → Personal access tokens | Moodboard rendering in Figma |
+
+Pick the image source in **Seaded → Image source** (Pexels or OpenAI). Without a key for the selected source, image placeholders render as tinted rects with the prompt as a caption.
 
 > Anthropic OAuth tokens (`sk-ant-oat…`) are blocked for third-party apps since Jan 2026. Use API keys from platform.claude.com.
 
@@ -138,33 +142,33 @@ Streaming: tokens are emitted to the renderer via `synthesis:token` as they arri
 
 **JSON parse resilience.** Long DSL outputs occasionally contain unescaped quotes or newlines inside string values. `parseResult()` tries strict `JSON.parse` first, then falls back to [`jsonrepair`](https://www.npmjs.com/package/jsonrepair). On strict failure it logs ±120 chars around the error position before attempting repair — helpful for debugging prompt regressions.
 
-### 5. Image generation (`src/main/services/image-gen.ts`)
+### 5. Image fetching (`src/main/services/image-gen.ts` + `pexels.ts`)
 
-Runs only if an OpenAI API key is set. After Claude finishes:
+After Claude finishes, `generateImagesForDirections(source, keys, directions, onProgress)` walks every `directionSpec.sections[].elements` tree (`walkElements` recurses into `frame` children) and collects elements where `kind === 'image' && imagePrompt && !imageUrl` (re-runs skip already-filled slots).
 
-1. Walk every `directionSpec.sections[].elements` tree (`walkElements` recurses into `frame` children).
-2. Collect every element where `kind === 'image'` and `imagePrompt` is present and `imageUrl` is not already populated (so re-runs can skip already-generated images).
-3. For each, enrich the prompt with the direction's concept + palette + mood so every image feels on-brand:
-   ```
-   <original prompt>
-   Art direction: <concept>
-   Palette cues: <top 3 hexes>
-   Mood: <top 3 mood words>
-   Style: editorial, high quality, no text overlays, no watermarks.
-   ```
-4. Pick a size from the element's aspect ratio: `1024×1024`, `1536×1024` (landscape), or `1024×1536` (portrait).
-5. Call `POST https://api.openai.com/v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`. `gpt-image-1` always returns `b64_json` (no `response_format` param). Concurrency is capped at **3** to avoid 429s.
-6. Wrap the returned base64 PNG as a `data:image/png;base64,…` URL and assign it back onto `element.imageUrl`; stash a deterministic hash on `element.imageHash`.
+Source is chosen in settings and defaults to **Pexels**. Dispatch happens per-image with concurrency capped at **3**.
 
-Progress events (`synthesis:image-progress`) stream to the renderer and update the `synthesize` step message (`"Genereerin pilte 3/13..."`).
+**Pexels (`src/main/services/pexels.ts`).** Hits `GET https://api.pexels.com/v1/search?query=…&per_page=15&orientation=…&size=large` with `Authorization: <key>`. Orientation is picked from the element's aspect ratio (`landscape` / `portrait` / `square`). A deterministic hash of the prompt picks one photo from the returned set so reruns stay stable. The `large` src (~940px long edge) is used — plenty for moodboards and small enough to keep the Figma execute script under ~100 KB even with 15 images. Prompt is used raw (concrete keywords search better than stylistic phrasing). 200 req/hr per key on the free tier.
 
-**Model access gotcha.** `gpt-image-1` is gated at **two levels** in OpenAI's system and both must be open:
+**OpenAI.** Enriches each prompt with direction context so images stay on-brand:
+```
+<original prompt>
+Art direction: <concept>
+Palette cues: <top 3 hexes>
+Mood: <top 3 mood words>
+Style: editorial, high quality, no text overlays, no watermarks.
+```
+Picks a size from the element's aspect ratio: `1024×1024`, `1536×1024` (landscape), or `1024×1536` (portrait). Calls `POST https://api.openai.com/v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`. Returned base64 is wrapped as `data:image/png;base64,…`.
+
+In both cases the resulting URL is assigned to `element.imageUrl`. Progress events (`synthesis:image-progress`) stream to the renderer and update the `synthesize` step message (`"Genereerin pilte 3/13..."`).
+
+**OpenAI model access gotcha.** `gpt-image-1` is gated at **two levels** and both must be open:
 - Org must be verified (platform.openai.com → Settings → Organization → General → Verifications)
 - Project must list `gpt-image-1` under Settings → Project → Limits → Allowed models
 
 If every image returns `403 model_not_found`, it's almost always the project-level allow-list — that list is empty-with-one-chat-model by default on new projects, silently blocking every other model.
 
-If no OpenAI key is set, step 5 is skipped entirely. The renderer in step 7 falls back to a tinted placeholder rectangle with the prompt shown as a caption.
+If the key for the selected source is missing, step 5 is skipped entirely and the renderer in step 7 falls back to a tinted placeholder rectangle with the prompt shown as a caption.
 
 ### 6. Report (`src/main/services/report-builder.ts`)
 
@@ -225,7 +229,8 @@ src/
     services/        Business logic
       claude.ts      Synthesis prompt + streaming
       scraper.ts     Playwright
-      image-gen.ts   OpenAI gpt-image-1 batch generator
+      image-gen.ts   Image dispatcher (Pexels | OpenAI) — fills element.imageUrl
+      pexels.ts      Pexels API v1 search client
       figma-script.ts  Generic DSL → Figma plugin code
       mcp-figma.ts   StdioClientTransport → figma-console-mcp
       mcp-paper.ts   StdioClientTransport → Paper binary

@@ -241,12 +241,16 @@ export interface SavedProjectData {
   seoWcagResult?: SeoWcagResult
 }
 
+export type ImageSource = 'pexels' | 'openai'
+
 export interface AppSettings {
   authMode: AuthMode
   researchMode: ResearchMode
+  imageSource: ImageSource
   anthropicApiKey: string
   ahrefsApiKey: string
   figmaAccessToken: string
   openaiApiKey: string
+  pexelsApiKey: string
   outputDir: string
 }

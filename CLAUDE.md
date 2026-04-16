@@ -7,7 +7,7 @@ Desktop tool for designers. Given a client website URL or creative brief, it:
 2. Researches SEO competitors via Ahrefs REST API
 3. Discovers design-focused competitors via Claude (geographic scope: local/regional/global)
 4. Synthesizes brand strategy + element-level visual DSL (3 directions) via Claude
-5. Generates moodboard imagery via OpenAI Images API (`gpt-image-1`)
+5. Generates moodboard imagery via Pexels (default) or OpenAI Images API (`gpt-image-1`) — user-selectable
 6. Generates a PDF/HTML report
 7. Renders the DSL as a live moodboard in Figma or Pencil (Paper) via MCP
 
@@ -19,7 +19,8 @@ Desktop tool for designers. Given a client website URL or creative brief, it:
 - **Playwright-core** for website scraping (Chromium auto-installs on first run to userData)
 - **node-vibrant** for color extraction from screenshots
 - **Anthropic SDK** (`claude-sonnet-4-6`, streaming, `maxRetries: 0`)
-- **OpenAI Images API** (`gpt-image-1`, `quality: medium`) for in-scene moodboard imagery
+- **Pexels REST API v1** — default image source; returns https URLs (no payload bloat, renders via `createImageAsync`). 200 req/hr free tier.
+- **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — alternative when user needs AI-generated scenes. Returns base64 → embedded as data URLs in figma_execute script (~3 MB per image, so 15 images = ~45 MB script).
 - **jsonrepair** — fallback for malformed synthesis JSON (unescaped quotes/newlines in long outputs)
 - **figma-console-mcp** (local, StdioClientTransport) for Figma integration
 - **Paper MCP binary** for Pencil/Paper integration
@@ -54,7 +55,8 @@ src/
       ahrefs.ts               # Ahrefs REST v3 client (in-memory cache)
       claude.ts               # Synthesis (SEO/WCAG + competitor discovery + DSL). Parses via jsonrepair fallback.
       seo-wcag.ts             # Standalone SEO/WCAG (legacy, mostly unused)
-      image-gen.ts            # OpenAI gpt-image-1 batch generator (fills imageUrl on image elements)
+      image-gen.ts            # Image fetch dispatcher — Pexels search or OpenAI generation based on `imageSource` setting
+      pexels.ts               # Pexels /v1/search wrapper — orientation + deterministic photo pick (hash of prompt → index)
       report-builder.ts       # HTML template → PDF (playwright)
       mcp-figma.ts            # StdioClientTransport → figma-console-mcp
       mcp-paper.ts            # StdioClientTransport → Paper binary
@@ -92,9 +94,12 @@ All stored via `electron-store` (Settings view):
 | Key | Where to get |
 |-----|-------------|
 | `anthropicApiKey` | platform.claude.com → API Keys (must be `sk-ant-api03-...`, NOT `sk-ant-oat...` OAuth tokens) |
-| `openaiApiKey` | platform.openai.com → API keys (optional, without it moodboard images are placeholder rects) |
+| `pexelsApiKey` | pexels.com/api/new (free, instant, 200 req/hr) — required when `imageSource: 'pexels'` (default) |
+| `openaiApiKey` | platform.openai.com → API keys — required when `imageSource: 'openai'` |
 | `ahrefsApiKey` | app.ahrefs.com → API (optional, without it competitor data is empty) |
 | `figmaAccessToken` | figma.com → Settings → Security → Personal access tokens |
+
+The active image source is chosen via the `imageSource` setting (`'pexels' | 'openai'`, default `pexels`). Without the active source's key, the image step is skipped and `figma-script.ts` renders tinted placeholder rectangles with the prompt as a caption.
 
 **Important**: Anthropic OAuth tokens (`sk-ant-oat01-...`) are blocked for third-party apps since Jan 2026. Only API keys from platform.claude.com work.
 
@@ -124,13 +129,27 @@ Single Claude call does everything (`src/main/services/claude.ts`):
 
 **JSON parse resilience**: long DSL outputs occasionally contain unescaped quotes or newlines in string values. `parseResult` tries strict `JSON.parse` first, then falls back to `jsonrepair`. On strict failure it logs ±120 chars around the error position via `dumpParseContext` to aid debugging. Do not silently swallow the fallback — if jsonrepair also fails, throw with full context.
 
-## Image Generation
+## Image Fetching
 
-`src/main/services/image-gen.ts` walks every `directionSpec.sections[].elements` tree (recursing into `frame` children), collects elements where `kind === 'image' && imagePrompt && !imageUrl`, and generates one image per prompt via `POST /v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`. Size is picked from the element's aspect ratio: `1024×1024`, `1536×1024` (landscape), or `1024×1536` (portrait). Each prompt is enriched with the direction's concept + palette + mood so images stay on-brand.
+`src/main/services/image-gen.ts` walks every `directionSpec.sections[].elements` tree (recursing into `frame` children), collects elements where `kind === 'image' && imagePrompt && !imageUrl`, and dispatches to one of two providers based on the `imageSource` setting:
 
-Result is stashed as a `data:image/png;base64,…` URL on `element.imageUrl` with a deterministic hash on `element.imageHash`. Figma plugin decodes data URLs in-plugin via `atob` → `Uint8Array` → `figma.createImage(bytes)`. Concurrency is capped at 3 to avoid 429s.
+**Pexels** (`source: 'pexels'`, default):
+- `GET https://api.pexels.com/v1/search?query=X&per_page=15&orientation=landscape|portrait|square&size=large` with `Authorization: <key>` header
+- Orientation picked from element aspect ratio: `>1.3` landscape, `<0.77` portrait, else square
+- Photo index picked deterministically via `hashString(prompt) % 15` so reruns with the same prompt stay stable
+- Returns the `src.large` https URL (~940px long edge) — stored directly on `element.imageUrl`
+- Prompts are passed raw (no enrichment) because Pexels search responds better to concrete keywords than stylistic phrasing
 
-If `openaiApiKey` is missing, the step is skipped and `figma-script.ts` renders tinted placeholder rectangles with the prompt as a caption.
+**OpenAI** (`source: 'openai'`):
+- `POST /v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`
+- Size from aspect ratio: `1024×1024`, `1536×1024`, or `1024×1536`
+- Prompt enriched with direction's concept + palette + mood for on-brand results
+- Returns base64 PNG → stashed as `data:image/png;base64,…` URL on `element.imageUrl`
+- Requires OpenAI **organisation** verification AND **project** Allowed models to include `gpt-image-1`. If all requests return `403 model_not_found`, go to platform.openai.com → Settings → Project → Limits → Allowed models and add `gpt-image-1`.
+
+Both paths: concurrency capped at 3, per-image progress reported via `synthesis:image-progress`.
+
+**Note on `element.imageHash`**: this field is an app-side cache key (32-bit → base36), NOT a Figma SHA1 hash. Do not pass it to `figma.set_fills` — the Figma image hash is obtained inside the plugin via `figma.createImage(bytes).hash` or `(await figma.createImageAsync(url)).hash`. The misnamed field is essentially dead but kept for backward compatibility with saved projects.
 
 ## Pipeline Steps
 
@@ -178,3 +197,13 @@ These invariants are enforced across `claude.ts`, `figma-script.ts`, and `image-
 - **Fonts + layouts come from Claude**, not from direction index. `styleSketchPrompts[i].typography` and `layoutRecipe` drive rendering. The P/Z/D renderer libraries (if ever introduced) are neutral building blocks — Claude's recipe selects which to use per section.
 - **Concept output must be rich mockups**, not simple brand cards — nav + hero + cards + footer per direction, each visually distinct enough to communicate the design attitude to a client.
 - **Image decoding**: data URLs must be decoded in-plugin with `atob` → `Uint8Array` → `figma.createImage(bytes)`. Do not pass data URLs to `figma.createImageAsync()` — it only accepts https URLs.
+- **Image fill ordering in `renderImage`**: append the rectangle to its parent *before* setting `r.fills = [{ type: 'IMAGE', imageHash }]`. The Bridge plugin's sandbox rejects image-fill writes to detached nodes with "Invalid SHA1 hash".
+- **`element.imageHash` is app-side, not Figma**: never forward it to `figma.set_fills`. The real Figma hash always comes from `figma.createImage(bytes).hash` inside the plugin sandbox.
+
+## Figma MCP Daemon Lifecycle
+
+`src/main/services/mcp-figma.ts` spawns `figma-console-mcp` via `StdioClientTransport` once per app launch. Before spawning, `cleanupOrphanDaemons()` scans `/tmp/figma-console-mcp-*.json`, reads each port file's `pid`, and:
+- Removes the port file if the PID is dead
+- `SIGKILL`s the process and removes the port file if PPID=1 (orphan from a crashed Electron run)
+
+Without this cleanup, an orphan from a prior crash holds port 9223, the new daemon gets pushed to 9224+, and the port-file discovery polling times out → "pordi faili ei leita" error. The cleanup also catches Claude Desktop's figma-console-mcp orphans — acceptable trade-off because stale orphans block our own startup.

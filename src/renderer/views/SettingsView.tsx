@@ -1,22 +1,26 @@
 import React, { useState, useEffect } from 'react'
-import type { ResearchMode } from '../../shared/types.js'
+import type { ImageSource, ResearchMode } from '../../shared/types.js'
 
 interface Settings {
   researchMode: ResearchMode
+  imageSource: ImageSource
   anthropicApiKey: string
   ahrefsApiKey: string
   figmaAccessToken: string
   openaiApiKey: string
+  pexelsApiKey: string
   outputDir: string
 }
 
 export default function SettingsView(): React.ReactElement {
   const [settings, setSettings] = useState<Settings>({
     researchMode: 'ahrefs',
+    imageSource: 'pexels',
     anthropicApiKey: '',
     ahrefsApiKey: '',
     figmaAccessToken: '',
     openaiApiKey: '',
+    pexelsApiKey: '',
     outputDir: ''
   })
   const [saved, setSaved] = useState(false)
@@ -31,12 +35,15 @@ export default function SettingsView(): React.ReactElement {
   useEffect(() => {
     if (!window.stiilileidja) { setLoading(false); return }
     window.stiilileidja.getSettings().then((s) => {
+      const raw = s as unknown as Partial<Settings>
       setSettings({
-        researchMode: (s as Settings).researchMode || 'ahrefs',
+        researchMode: raw.researchMode || 'ahrefs',
+        imageSource: raw.imageSource || 'pexels',
         anthropicApiKey: s.anthropicApiKey || '',
         ahrefsApiKey: s.ahrefsApiKey || '',
         figmaAccessToken: s.figmaAccessToken || '',
-        openaiApiKey: (s as unknown as { openaiApiKey?: string }).openaiApiKey || '',
+        openaiApiKey: raw.openaiApiKey || '',
+        pexelsApiKey: raw.pexelsApiKey || '',
         outputDir: s.outputDir || ''
       })
       setLoading(false)
@@ -199,9 +206,92 @@ export default function SettingsView(): React.ReactElement {
           placeholder="figd_..."
         />
 
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 24 }}>
+          <div style={{
+            fontFamily: 'var(--display)', fontSize: 13, fontWeight: 600,
+            color: 'var(--text-primary)', marginBottom: 4
+          }}>
+            Piltide allikas
+          </div>
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--text-muted)', marginBottom: 12
+          }}>
+            Pexels on tasuta ja kiire (päris fotod, https URL-id). OpenAI genereerib AI pildid — täpsem, kuid aeglasem ja tasuline.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {([
+              { id: 'pexels', label: 'Pexels', sub: 'Stock fotod · tasuta' },
+              { id: 'openai', label: 'OpenAI', sub: 'AI genereeritud · $' }
+            ] as { id: ImageSource; label: string; sub: string }[]).map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setSettings(s => ({ ...s, imageSource: opt.id }))}
+                style={{
+                  padding: '12px 10px',
+                  background: settings.imageSource === opt.id ? 'var(--accent-dim)' : 'var(--bg-card)',
+                  border: `1px solid ${settings.imageSource === opt.id ? 'var(--accent)' : 'var(--border)'}`,
+                  borderRadius: 8,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div style={{
+                  fontFamily: 'var(--display)', fontSize: 12, fontWeight: 600,
+                  color: settings.imageSource === opt.id ? 'var(--accent)' : 'var(--text-primary)',
+                  marginBottom: 3
+                }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>
+                  {opt.sub}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontFamily: 'var(--display)', fontSize: 13, fontWeight: 600,
+            color: 'var(--text-primary)', marginBottom: 4
+          }}>
+            Pexels API võti
+          </div>
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, lineHeight: 1.6
+          }}>
+            Tasuta 200 päringut tunnis. Vaja ainult siis, kui piltide allikaks on valitud Pexels.
+          </div>
+          <button
+            onClick={() => window.stiilileidja?.openExternal('https://www.pexels.com/api/new/')}
+            style={{
+              marginBottom: 12,
+              padding: '4px 10px',
+              background: 'transparent',
+              border: '1px solid var(--border-active)',
+              borderRadius: 5,
+              fontFamily: 'var(--mono)', fontSize: 10,
+              color: 'var(--accent)',
+              cursor: 'pointer', outline: 'none'
+            }}
+          >
+            Hangi API võti pexels.com ↗
+          </button>
+          <SettingField
+            label=""
+            description=""
+            value={settings.pexelsApiKey}
+            onChange={(v) => setSettings(s => ({ ...s, pexelsApiKey: v }))}
+            type="password"
+            placeholder="563492ad..."
+          />
+        </div>
+
         <SettingField
           label="OpenAI API võti (piltide genereerimiseks)"
-          description="platform.openai.com → API keys. Vabatahtlik — ilma selleta jääb suunapildi plats pildigeneraatori promptiga, kuid faktilist pilti ei teki."
+          description="platform.openai.com → API keys. Vaja ainult siis, kui piltide allikaks on valitud OpenAI."
           value={settings.openaiApiKey}
           onChange={(v) => setSettings(s => ({ ...s, openaiApiKey: v }))}
           type="password"

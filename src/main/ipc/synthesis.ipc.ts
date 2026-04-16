@@ -8,7 +8,9 @@ export function registerSynthesisIpc(mainWindow: BrowserWindow): void {
   ipcMain.handle('synthesize-brief', async (_event, context: SynthesisContext) => {
     const authMode = store.get('authMode') || 'api-key'
     const apiKey = store.get('anthropicApiKey')
+    const imageSource = store.get('imageSource') || 'pexels'
     const openaiKey = store.get('openaiApiKey') || ''
+    const pexelsKey = store.get('pexelsApiKey') || ''
 
     console.log('[synthesize] authMode:', authMode)
     console.log('[synthesize] apiKey present:', !!apiKey, apiKey ? `(${apiKey.slice(0, 16)}...)` : '(empty)')
@@ -30,19 +32,21 @@ export function registerSynthesisIpc(mainWindow: BrowserWindow): void {
       console.log('[synthesize] discoveredCompetitors:', result.discoveredCompetitors?.length ?? 'none')
       console.log('[synthesize] seoWcag present:', !!result.seoWcag)
 
-      if (openaiKey && result.directionSpecs && result.directionSpecs.length > 0) {
-        console.log('[synthesize] generating images with OpenAI...')
-        mainWindow.webContents.send('synthesis:image-progress', { done: 0, total: 0, label: 'Alustan piltide genereerimist' })
+      const activeKey = imageSource === 'pexels' ? pexelsKey : openaiKey
+      if (activeKey && result.directionSpecs && result.directionSpecs.length > 0) {
+        console.log(`[synthesize] fetching images (${imageSource})...`)
+        mainWindow.webContents.send('synthesis:image-progress', { done: 0, total: 0, label: 'Alustan piltide otsingut' })
         const imgResult = await generateImagesForDirections(
-          openaiKey,
+          imageSource,
+          { openaiApiKey: openaiKey, pexelsApiKey: pexelsKey },
           result.directionSpecs,
           (done, total, label) => {
             mainWindow.webContents.send('synthesis:image-progress', { done, total, label })
           }
         )
-        console.log(`[synthesize] images: generated ${imgResult.generated}, failed ${imgResult.failed}`)
-      } else if (!openaiKey) {
-        console.log('[synthesize] skipping image generation — no OpenAI key')
+        console.log(`[synthesize] images (${imageSource}): generated ${imgResult.generated}, failed ${imgResult.failed}`)
+      } else if (!activeKey) {
+        console.log(`[synthesize] skipping image fetch — no ${imageSource} key`)
       }
 
       return result

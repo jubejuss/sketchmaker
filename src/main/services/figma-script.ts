@@ -19,7 +19,12 @@ export function buildFigmaScript(data: MoodboardData): string {
   const specsJson = JSON.stringify(padded)
   const fontReqsJson = JSON.stringify(fontReqs)
 
+  const imageElementCount = countImageElements(padded)
+
   return `
+const __SL_STATS = { imgResolved: 0, imgFailed: 0, imgMissingUrl: 0, imgTotal: ${imageElementCount} };
+console.log('[stiilileidja] script start — directions:', ${padded.length}, 'imageElements:', ${imageElementCount});
+
 async function main() {
   await figma.loadAllPagesAsync();
   let page = figma.root.children.find(p => p.name === "Style Sketches — ${canvasName}");
@@ -68,39 +73,16 @@ async function main() {
     return str;
   }
 
-  // ── Image cache: imageUrl/imageHash → figma Image ref ──────────────────────
+  // Image creation is now inline in renderImage — Bridge plugin's eval context
+  // rejects image hashes on detached nodes, so fills must be set after appendChild.
   const IMAGE_CACHE = {};
-  function dataUrlToBytes(dataUrl) {
-    const comma = dataUrl.indexOf(',');
-    if (comma < 0) return null;
-    const b64 = dataUrl.slice(comma + 1);
-    const bin = atob(b64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  function dataUrlToBytes(url) {
+    const commaIdx = url.indexOf(',');
+    const base64 = commaIdx >= 0 ? url.slice(commaIdx + 1) : '';
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes;
-  }
-  async function resolveImage(el) {
-    if (el.imageHash) return { hash: el.imageHash };
-    if (el.imageUrl && IMAGE_CACHE[el.imageUrl]) return IMAGE_CACHE[el.imageUrl];
-    if (el.imageUrl) {
-      try {
-        let img;
-        if (el.imageUrl.indexOf('data:') === 0) {
-          const bytes = dataUrlToBytes(el.imageUrl);
-          if (!bytes) return null;
-          img = figma.createImage(bytes);
-        } else {
-          img = await figma.createImageAsync(el.imageUrl);
-        }
-        const ref = { hash: img.hash };
-        IMAGE_CACHE[el.imageUrl] = ref;
-        return ref;
-      } catch (e) {
-        console.warn('resolveImage failed:', (el.imageUrl || '').slice(0, 60), e && e.message);
-        return null;
-      }
-    }
-    return null;
   }
 
   // ── Element renderer (recursive for frames) ────────────────────────────────
@@ -204,28 +186,67 @@ async function main() {
     r.y = el.y || 0;
     if (el.cornerRadius) r.cornerRadius = el.cornerRadius;
     if (el.rotation) r.rotation = el.rotation;
-    const img = await resolveImage(el);
-    if (img && img.hash) {
-      r.fills = [{ type: 'IMAGE', imageHash: img.hash, scaleMode: 'FILL' }];
-    } else {
-      // placeholder: tinted box with a small caption
-      r.fills = [solidFill('#C7C2BA', 1)];
-      if (el.imagePrompt) {
-        try {
-          const cap = figma.createText();
-          cap.fontName = FALLBACK_FONT;
-          cap.characters = 'IMAGE · ' + String(el.imagePrompt).slice(0, 80);
-          cap.fontSize = 10;
-          cap.fills = [solidFill('#1A1A1A', 0.55)];
-          cap.x = r.x + 8;
-          cap.y = r.y + 8;
-          cap.resize(Math.max((el.w || 100) - 16, 20), 40);
-          cap.textAutoResize = 'HEIGHT';
-          parent.appendChild(cap);
-        } catch (e) { /* ignore caption failure */ }
+    // Append to parent BEFORE setting image fill. Bridge plugin's SET_IMAGE_FILL
+    // always operates on live nodes (lookup via getNodeByIdAsync); detached nodes
+    // seem to reject image hashes with "Invalid SHA1 hash" in set_fills.
+    parent.appendChild(r);
+
+    // NOTE: el.imageHash is our app-side dedup key (32-bit → base36), NOT a Figma
+    // SHA1 hash. Do not pass it to figma.set_fills. The only valid Figma image
+    // hash comes from figma.createImage(bytes).hash inside this sandbox.
+    let imageHash = null;
+    if (el.imageUrl) {
+      try {
+        if (IMAGE_CACHE[el.imageUrl]) {
+          imageHash = IMAGE_CACHE[el.imageUrl];
+        } else if (el.imageUrl.slice(0, 5) === 'data:') {
+          const bytes = dataUrlToBytes(el.imageUrl);
+          const image = figma.createImage(bytes);
+          imageHash = image.hash;
+          IMAGE_CACHE[el.imageUrl] = imageHash;
+          if (__SL_STATS.imgResolved === 0) {
+            console.log('[stiilileidja] first image hash:', imageHash, 'type:', typeof imageHash, 'len:', (imageHash || '').length);
+          }
+        } else {
+          const image = await figma.createImageAsync(el.imageUrl);
+          imageHash = image.hash;
+          IMAGE_CACHE[el.imageUrl] = imageHash;
+        }
+      } catch (e) {
+        console.warn('[stiilileidja] image create failed:', e && e.message, 'prefix:', el.imageUrl.slice(0, 60));
+        __SL_STATS.imgFailed++;
       }
     }
-    parent.appendChild(r);
+
+    if (imageHash) {
+      try {
+        r.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash: imageHash }];
+        __SL_STATS.imgResolved++;
+        return r;
+      } catch (e) {
+        console.warn('[stiilileidja] set_fills failed, hash:', imageHash, 'err:', e && e.message);
+        __SL_STATS.imgFailed++;
+      }
+    } else if (!el.imageUrl) {
+      __SL_STATS.imgMissingUrl++;
+    }
+
+    // Placeholder: tinted box with caption
+    r.fills = [solidFill('#C7C2BA', 1)];
+    if (el.imagePrompt) {
+      try {
+        const cap = figma.createText();
+        cap.fontName = FALLBACK_FONT;
+        cap.characters = 'IMAGE · ' + String(el.imagePrompt).slice(0, 80);
+        cap.fontSize = 10;
+        cap.fills = [solidFill('#1A1A1A', 0.55)];
+        cap.x = r.x + 8;
+        cap.y = r.y + 8;
+        cap.resize(Math.max((el.w || 100) - 16, 20), 40);
+        cap.textAutoResize = 'HEIGHT';
+        parent.appendChild(cap);
+      } catch (e) { /* ignore caption failure */ }
+    }
     return r;
   }
 
@@ -313,10 +334,24 @@ async function main() {
   }
 
   figma.viewport.scrollAndZoomIntoView([canvas]);
+  console.log('[stiilileidja] done. images:', __SL_STATS);
 }
 
 await main();
 `.trim()
+}
+
+function countImageElements(specs: DirectionSpec[]): number {
+  let n = 0
+  const walk = (els: VisualElement[] | undefined): void => {
+    if (!els) return
+    for (const el of els) {
+      if (el.kind === 'image') n++
+      if (el.children) walk(el.children)
+    }
+  }
+  for (const d of specs) for (const s of d.sections ?? []) walk(s.elements)
+  return n
 }
 
 // ── TypeScript-side helpers ──────────────────────────────────────────────────

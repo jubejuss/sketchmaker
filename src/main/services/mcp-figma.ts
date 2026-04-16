@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { execSync } from 'child_process'
 import fs from 'fs'
 import type { MoodboardData } from '../../shared/types.js'
 import { buildFigmaScript } from './figma-script.js'
@@ -45,12 +46,71 @@ async function checkHealth(port: number): Promise<{ ok: boolean; clients: number
   }
 }
 
+/**
+ * Clean up orphaned figma-console-mcp daemons from previous crashed Electron runs.
+ *
+ * An orphan has PPID=1 (reparented to launchd after its Electron parent died).
+ * Healthy daemons still have an Electron parent. We also clear stale port files
+ * whose PID no longer exists.
+ *
+ * This runs once on startup, before we spawn our own daemon. If a live orphan
+ * was serving another app (e.g., Claude Desktop after a crash), that app will
+ * need to reconnect — but leaving orphans around means OUR startup fails with
+ * "port file not found" because the new daemon gets pushed to a different port.
+ */
+function cleanupOrphanDaemons(): void {
+  let files: string[] = []
+  try {
+    files = fs.readdirSync('/tmp').filter(f => /^figma-console-mcp-\d+\.json$/.test(f))
+  } catch {
+    return
+  }
+
+  for (const f of files) {
+    const filePath = `/tmp/${f}`
+    let pid: number | null = null
+    try {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf8')) as { pid?: unknown }
+      if (typeof data.pid === 'number') pid = data.pid
+    } catch {}
+
+    if (!pid) {
+      try { fs.unlinkSync(filePath) } catch {}
+      console.log(`[figma-daemon] Removed unreadable port file ${f}`)
+      continue
+    }
+
+    // process.kill(pid, 0) throws ESRCH if the PID doesn't exist
+    let alive = true
+    try { process.kill(pid, 0) } catch { alive = false }
+
+    if (!alive) {
+      try { fs.unlinkSync(filePath) } catch {}
+      console.log(`[figma-daemon] Removed stale port file ${f} (PID ${pid} dead)`)
+      continue
+    }
+
+    let ppid: number | null = null
+    try {
+      ppid = parseInt(execSync(`ps -o ppid= -p ${pid}`, { encoding: 'utf8' }).trim())
+    } catch {}
+
+    if (ppid === 1) {
+      try { process.kill(pid, 'SIGKILL') } catch {}
+      try { fs.unlinkSync(filePath) } catch {}
+      console.log(`[figma-daemon] Killed orphan daemon PID ${pid} (port file ${f})`)
+    }
+  }
+}
+
 async function _startDaemon(): Promise<void> {
   const figmaToken = store.get('figmaAccessToken')
   if (!figmaToken) {
     console.log('[figma-daemon] No token configured — skipping')
     return
   }
+
+  cleanupOrphanDaemons()
 
   // Snapshot existing ports before spawning to identify our new process
   const portsBefore = getPortFiles()
@@ -216,6 +276,10 @@ export async function executeFigmaMoodboard(
 
   onProgress('Ehitan moodboardi raamid...')
   const script = buildFigmaScript(data)
+  const sizeKB = (script.length / 1024).toFixed(1)
+  const imageElCount = (script.match(/"kind":"image"/g) || []).length
+  const dataUrlCount = (script.match(/data:image\//g) || []).length
+  console.log(`[figma] script built — size: ${sizeKB} KB, image elements: ${imageElCount}, data URLs embedded: ${dataUrlCount}`)
   // timeout:30000 is the maximum figma_execute allows (schema max: 30000)
   await withTimeout(
     client.callTool({ name: 'figma_execute', arguments: { code: script, timeout: 30000 } }),

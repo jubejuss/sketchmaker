@@ -5,10 +5,12 @@ const store = new Store<AppSettings>({
   defaults: {
     authMode: 'api-key',
     researchMode: 'ahrefs',
+    imageSource: 'pexels',
     anthropicApiKey: '',
     ahrefsApiKey: '',
     figmaAccessToken: '',
     openaiApiKey: '',
+    pexelsApiKey: '',
     outputDir: ''
   },
   encryptionKey: 'stiilileidja-v1'

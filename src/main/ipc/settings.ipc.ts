@@ -7,10 +7,12 @@ export function registerSettingsIpc(): void {
     return {
       authMode: store.get('authMode') || 'api-key',
       researchMode: store.get('researchMode') || 'ahrefs',
+      imageSource: store.get('imageSource') || 'pexels',
       anthropicApiKey: store.get('anthropicApiKey') || '',
       ahrefsApiKey: store.get('ahrefsApiKey') || '',
       figmaAccessToken: store.get('figmaAccessToken') || '',
       openaiApiKey: store.get('openaiApiKey') || '',
+      pexelsApiKey: store.get('pexelsApiKey') || '',
       outputDir: store.get('outputDir') || ''
     }
   })
@@ -18,10 +20,12 @@ export function registerSettingsIpc(): void {
   ipcMain.handle('save-settings', (_event, settings: Partial<AppSettings>) => {
     if (settings.authMode !== undefined) store.set('authMode', settings.authMode)
     if (settings.researchMode !== undefined) store.set('researchMode', settings.researchMode)
+    if (settings.imageSource !== undefined) store.set('imageSource', settings.imageSource)
     if (settings.anthropicApiKey !== undefined) store.set('anthropicApiKey', settings.anthropicApiKey)
     if (settings.ahrefsApiKey !== undefined) store.set('ahrefsApiKey', settings.ahrefsApiKey)
     if (settings.figmaAccessToken !== undefined) store.set('figmaAccessToken', settings.figmaAccessToken)
     if (settings.openaiApiKey !== undefined) store.set('openaiApiKey', settings.openaiApiKey)
+    if (settings.pexelsApiKey !== undefined) store.set('pexelsApiKey', settings.pexelsApiKey)
     if (settings.outputDir !== undefined) store.set('outputDir', settings.outputDir)
     return { ok: true }
   })
