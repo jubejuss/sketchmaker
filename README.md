@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/jubejuss/sketchmaker
 
-Desktop moodboard generator for designers. Point it at a client URL (or paste a brief), it scrapes the site, analyses competitors, runs a single Claude call that outputs three radically different visual directions as a bespoke element-level DSL, generates images with DALL·E 3, then renders everything live into Figma or Pencil (Paper) via MCP.
+Desktop moodboard generator for designers. Point it at a client URL (or paste a brief), it scrapes the site, analyses competitors, runs a single Claude call that outputs three radically different visual directions as a bespoke element-level DSL, generates images with OpenAI's `gpt-image-1`, then renders everything live into Figma or Pencil (Paper) via MCP.
 
 No layout templates — every pixel spec is authored by Claude per brand.
 
@@ -11,8 +11,8 @@ No layout templates — every pixel spec is authored by Claude per brand.
 - **Electron 33** (`electron-vite`, ESM) + **React 19** + TypeScript + Zustand
 - **Playwright-core** — scraping (Chromium auto-installs to userData on first run)
 - **node-vibrant** — colour extraction
-- **Anthropic SDK** (`claude-sonnet-4-6`, streaming)
-- **OpenAI Images API** (`dall-e-3`) — in-scene moodboard imagery
+- **Anthropic SDK** (`claude-sonnet-4-6`, streaming) + **jsonrepair** fallback for malformed synthesis JSON
+- **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — in-scene moodboard imagery
 - **MCP**: `figma-console-mcp` (Figma Desktop Bridge plugin, CDP :9222 + WS :9225) and Paper MCP binary
 - **electron-store** — encrypted settings persistence
 
@@ -40,7 +40,7 @@ All keys are configured in the app's **Seaded** (Settings) view — not in env v
 | Key | Source | Required for |
 |-----|--------|--------------|
 | `anthropicApiKey` | platform.claude.com → API Keys (`sk-ant-api03-…`) | **Mandatory** — synthesis, SEO/WCAG, competitor discovery |
-| `openaiApiKey` | platform.openai.com → API keys (`sk-proj-…` or `sk-…`) | Optional — DALL·E 3 image generation. Without it, moodboards render with tinted placeholder rects instead of photos |
+| `openaiApiKey` | platform.openai.com → API keys (`sk-proj-…` or `sk-…`) | Optional — `gpt-image-1` image generation. Without it, moodboards render with tinted placeholder rects instead of photos. Your OpenAI **org** must be verified AND your **project** must list `gpt-image-1` under Settings → Project → Limits → Allowed models |
 | `ahrefsApiKey` | app.ahrefs.com → Account → API | Optional — organic SEO competitors. Without it that step is skipped |
 | `figmaAccessToken` | figma.com → Settings → Security → Personal access tokens | Moodboard rendering in Figma |
 
@@ -136,12 +136,14 @@ Every element is bespoke — there are no layout templates anywhere in the codeb
 
 Streaming: tokens are emitted to the renderer via `synthesis:token` as they arrive, so `PipelineView` shows the JSON being authored live. `maxRetries: 0` on the SDK — our own `withRetry()` reads the `retry-after` header on 429s and forwards a `synthesis:rate-limit-wait` event so the UI can display the countdown.
 
+**JSON parse resilience.** Long DSL outputs occasionally contain unescaped quotes or newlines inside string values. `parseResult()` tries strict `JSON.parse` first, then falls back to [`jsonrepair`](https://www.npmjs.com/package/jsonrepair). On strict failure it logs ±120 chars around the error position before attempting repair — helpful for debugging prompt regressions.
+
 ### 5. Image generation (`src/main/services/image-gen.ts`)
 
 Runs only if an OpenAI API key is set. After Claude finishes:
 
 1. Walk every `directionSpec.sections[].elements` tree (`walkElements` recurses into `frame` children).
-2. Collect every element where `kind === 'image'` and `imagePrompt` is present.
+2. Collect every element where `kind === 'image'` and `imagePrompt` is present and `imageUrl` is not already populated (so re-runs can skip already-generated images).
 3. For each, enrich the prompt with the direction's concept + palette + mood so every image feels on-brand:
    ```
    <original prompt>
@@ -150,11 +152,17 @@ Runs only if an OpenAI API key is set. After Claude finishes:
    Mood: <top 3 mood words>
    Style: editorial, high quality, no text overlays, no watermarks.
    ```
-4. Pick a DALL·E 3 size from the element's aspect ratio: `1024×1024`, `1792×1024` (landscape), or `1024×1792` (portrait).
-5. Call `POST https://api.openai.com/v1/images/generations` with `model: 'dall-e-3'`, `response_format: 'b64_json'`, `quality: 'standard'`. Concurrency is capped at **2** to stay under DALL·E 3's ~5 img/min tier-1 limit.
+4. Pick a size from the element's aspect ratio: `1024×1024`, `1536×1024` (landscape), or `1024×1536` (portrait).
+5. Call `POST https://api.openai.com/v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`. `gpt-image-1` always returns `b64_json` (no `response_format` param). Concurrency is capped at **3** to avoid 429s.
 6. Wrap the returned base64 PNG as a `data:image/png;base64,…` URL and assign it back onto `element.imageUrl`; stash a deterministic hash on `element.imageHash`.
 
 Progress events (`synthesis:image-progress`) stream to the renderer and update the `synthesize` step message (`"Genereerin pilte 3/13..."`).
+
+**Model access gotcha.** `gpt-image-1` is gated at **two levels** in OpenAI's system and both must be open:
+- Org must be verified (platform.openai.com → Settings → Organization → General → Verifications)
+- Project must list `gpt-image-1` under Settings → Project → Limits → Allowed models
+
+If every image returns `403 model_not_found`, it's almost always the project-level allow-list — that list is empty-with-one-chat-model by default on new projects, silently blocking every other model.
 
 If no OpenAI key is set, step 5 is skipped entirely. The renderer in step 7 falls back to a tinted placeholder rectangle with the prompt shown as a caption.
 
@@ -217,7 +225,7 @@ src/
     services/        Business logic
       claude.ts      Synthesis prompt + streaming
       scraper.ts     Playwright
-      image-gen.ts   DALL·E 3 batch generator
+      image-gen.ts   OpenAI gpt-image-1 batch generator
       figma-script.ts  Generic DSL → Figma plugin code
       mcp-figma.ts   StdioClientTransport → figma-console-mcp
       mcp-paper.ts   StdioClientTransport → Paper binary
@@ -260,9 +268,10 @@ interface VisualElement {
 - **Token budget** — `max_tokens: 32000`. Bigger DSL output = richer moodboards but slower/pricier runs.
 
 ### Image generation
-- `gpt-image-1` is cheaper and sharper than `dall-e-3` but requires OpenAI org verification. Switch the model in `src/main/services/image-gen.ts` once your org is verified.
-- Add an image cache by prompt hash so repeated runs on the same brief reuse images.
+- Currently on `gpt-image-1` at `quality: medium`. Bump to `high` for richer output at higher cost, or drop to `low` for cheap drafts. Edit `src/main/services/image-gen.ts`.
+- Add a persistent image cache by prompt hash (currently only the in-memory `imageHash` on each element) so repeated runs on the same brief reuse images across sessions.
 - Try a faster local model (SDXL Turbo, Flux.1-schnell) via Replicate for cost control.
+- Fall back to `dall-e-3` automatically on `gpt-image-1` 403s to support projects where only the older model is allow-listed.
 
 ### Renderer
 - `figma-script.ts` supports only the base DSL today. Adding `gradient` fills, `effects` (shadows, blurs), component instances, or Auto Layout would let Claude specify richer outputs.

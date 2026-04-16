@@ -10,12 +10,12 @@ export interface GeneratedImage {
   imageHash?: string
 }
 
-type DalleSize = '1024x1024' | '1792x1024' | '1024x1792'
+type ImageSize = '1024x1024' | '1536x1024' | '1024x1536'
 
 interface ImagePromptRef {
   element: VisualElement
   prompt: string
-  size: DalleSize
+  size: ImageSize
 }
 
 export async function generateImagesForDirections(
@@ -43,8 +43,8 @@ export async function generateImagesForDirections(
   let failed = 0
   onProgress?.(0, total, 'Alustan piltide genereerimist')
 
-  // DALL-E 3 tier-1 limit is ~5 images/min. Keep concurrency low.
-  const CONCURRENCY = 2
+  // gpt-image-1 tier-1 limit is higher than DALL·E 3, but keep concurrency moderate to avoid 429s.
+  const CONCURRENCY = 3
   const queue = [...refs]
   await Promise.all(
     Array.from({ length: CONCURRENCY }, async () => {
@@ -75,11 +75,11 @@ function walkElements(elements: VisualElement[] | undefined, visit: (el: VisualE
   }
 }
 
-function pickSize(w?: number, h?: number): DalleSize {
+function pickSize(w?: number, h?: number): ImageSize {
   if (!w || !h) return '1024x1024'
   const ratio = w / h
-  if (ratio > 1.3) return '1792x1024'
-  if (ratio < 0.77) return '1024x1792'
+  if (ratio > 1.3) return '1536x1024'
+  if (ratio < 0.77) return '1024x1536'
   return '1024x1024'
 }
 
@@ -92,7 +92,7 @@ function enrichPrompt(raw: string, dir: DirectionSpec): string {
 async function generateImage(
   apiKey: string,
   prompt: string,
-  size: DalleSize
+  size: ImageSize
 ): Promise<string> {
   const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
@@ -101,11 +101,10 @@ async function generateImage(
       'Authorization': `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: 'dall-e-3',
+      model: 'gpt-image-1',
       prompt: prompt.slice(0, 4000),
       size,
-      quality: 'standard',
-      response_format: 'b64_json',
+      quality: 'medium',
       n: 1
     })
   })
