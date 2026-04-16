@@ -8,7 +8,8 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "probe:images": "npx -y tsx scripts/probe-figma-images.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
