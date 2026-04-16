@@ -57,17 +57,156 @@ All keys are configured in the app's **Seaded** (Settings) view — not in env v
 
 Just run Pencil/Paper. The MCP binary is spawned automatically.
 
-## Pipeline steps
+## How the full pipeline works — from input to sketches
 
-`scrape → research → discover → synthesize → (images) → report → moodboard`
+`input → scrape → research → discover → synthesize → images → report → moodboard`
 
-1. **scrape** — Playwright screenshots + CSS fonts + palette
-2. **research** — Ahrefs organic competitors (skipped w/o key or in brief-only mode)
-3. **discover** — design-focused competitors (runs inside synthesis)
-4. **synthesize** — single streaming Claude call, returns `SynthesisResult` including `directionSpecs[]` with full element-level DSL per section
-5. **image generation** — walks the DSL, calls DALL·E 3 per `image` element, writes `data:` URLs back
-6. **report** — PDF + HTML written to `~/Desktop/stiilileidja-output` (default)
-7. **moodboard** — Figma (`figma-execute`) renders the DSL live, or outputs a copy-pasteable prompt (`figma-prompt` / `paper-prompt`)
+### 1. Input (`src/renderer/views/InputView.tsx`)
+
+The user is in the renderer process and chooses one of two paths:
+
+- **URL mode** — enter a client website. Scraping runs.
+- **Brief mode** — paste a freeform description of the project. Scraping is skipped.
+
+They also pick:
+- **Competitor scope** — `local` · `regional` · `global`. This feeds into the Claude prompt so discovered design-competitors match the right geography.
+- **Page sections** — which parts the moodboard should lay out (`header`, `hero`, `events`, `news`, `team`, `services`, `gallery`, `testimonials`, `cta`, `contact`, `footer`). Default is `['header', 'hero', 'events', 'news', 'footer']`.
+
+On "Alusta" the renderer invokes IPC handlers in sequence and streams each step's status via `step:update` events into the Zustand store, which `PipelineView.tsx` renders as a live timeline.
+
+### 2. Scrape (`src/main/services/scraper.ts`)
+
+Runs only in URL mode. Main process launches Chromium via `playwright-core` (downloaded once to `userData/browsers/` on first run).
+
+What it captures:
+- `aboveFold` screenshot (viewport, base64 PNG)
+- `fullPage` screenshot (entire scroll, base64 PNG)
+- CSS-declared `font-family` values from the page, classified as `google` / `system` / `custom`
+- Dominant colour palette: `node-vibrant` runs over the full-page screenshot → `Vibrant`, `Muted`, `DarkVibrant`, `LightVibrant`, `DarkMuted`, `LightMuted` colour swatches with hex + RGB + population score
+- `<title>`, `<meta description>`, and any `og:image`
+
+Everything is bundled into a `ScrapedSite` and returned to the renderer.
+
+### 3. Research (`src/main/services/ahrefs.ts`)
+
+Runs only if an Ahrefs API key is set in settings. Calls `site-explorer-organic-competitors` on the client domain, pulls the top N competitors with domain rating + organic traffic + top keywords. Returns `CompetitorData[]`. Skipped entirely in brief-only mode, or if the key is missing — the pipeline continues with empty competitor data.
+
+### 4. Discover + Synthesize (`src/main/services/claude.ts`)
+
+**One** streaming call to `claude-sonnet-4-6` does everything: SEO/WCAG analysis, design-competitor discovery, and the full visual synthesis. The system prompt has two parts:
+
+**PART A — strategic analysis.** Claude reads the brief + scraped data + Ahrefs competitors and produces:
+- `brandPersonality` (adjectives), `brandVoice`, `targetAudience`
+- `colorStrategy` with primary/accent/neutral/background hexes + a `rationale`
+- `suggestedFonts` (heading + body) + `typographyRationale`
+- `moodboardKeywords`
+- `competitorGaps` — visual space where no competitor is playing
+- `competitorVisualProfiles` — per-Ahrefs-competitor interpretation
+- `discoveredCompetitors` — 5–8 design-focused reference brands matching the scope, each with `visualStyle`, `keyColors`, `typography`, `reason`
+- `seoWcag` (if URL mode) — title/meta/headings analysis, SEO opportunities, WCAG AA issues + pass list
+
+**PART B — visual DSL.** Claude then emits three radically different `directionSpecs`. Each is:
+```ts
+{
+  title: 'Suund 1: Editorial Minimalism',
+  concept: '...',
+  palette: ['#0A0A0A', '#FFFCF5', '#C8A96E', ...],
+  fonts: { heading: 'Playfair Display', headingWeight: 'Regular', body: 'Inter' },
+  mood: ['quiet', 'confident', 'slow'],
+  heroImagePrompt: '...',
+  sections: [
+    {
+      type: 'hero',
+      height: 900,
+      elements: [
+        { kind: 'rect', x: 0, y: 0, w: 1440, h: 900, color: '#FFFCF5' },
+        { kind: 'text', x: 96, y: 240, w: 1000, text: 'Community is built here.',
+          fontFamily: 'Playfair Display', fontWeight: 'Regular', fontSize: 88, color: '#0A0A0A' },
+        { kind: 'image', x: 760, y: 120, w: 600, h: 700,
+          imagePrompt: 'Warm golden-hour light on a Kalamaja courtyard, documentary editorial style' },
+        ...
+      ]
+    },
+    ...
+  ]
+}
+```
+
+Every element is bespoke — there are no layout templates anywhere in the codebase. Claude is the designer; the renderer is a dumb interpreter.
+
+Streaming: tokens are emitted to the renderer via `synthesis:token` as they arrive, so `PipelineView` shows the JSON being authored live. `maxRetries: 0` on the SDK — our own `withRetry()` reads the `retry-after` header on 429s and forwards a `synthesis:rate-limit-wait` event so the UI can display the countdown.
+
+### 5. Image generation (`src/main/services/image-gen.ts`)
+
+Runs only if an OpenAI API key is set. After Claude finishes:
+
+1. Walk every `directionSpec.sections[].elements` tree (`walkElements` recurses into `frame` children).
+2. Collect every element where `kind === 'image'` and `imagePrompt` is present.
+3. For each, enrich the prompt with the direction's concept + palette + mood so every image feels on-brand:
+   ```
+   <original prompt>
+   Art direction: <concept>
+   Palette cues: <top 3 hexes>
+   Mood: <top 3 mood words>
+   Style: editorial, high quality, no text overlays, no watermarks.
+   ```
+4. Pick a DALL·E 3 size from the element's aspect ratio: `1024×1024`, `1792×1024` (landscape), or `1024×1792` (portrait).
+5. Call `POST https://api.openai.com/v1/images/generations` with `model: 'dall-e-3'`, `response_format: 'b64_json'`, `quality: 'standard'`. Concurrency is capped at **2** to stay under DALL·E 3's ~5 img/min tier-1 limit.
+6. Wrap the returned base64 PNG as a `data:image/png;base64,…` URL and assign it back onto `element.imageUrl`; stash a deterministic hash on `element.imageHash`.
+
+Progress events (`synthesis:image-progress`) stream to the renderer and update the `synthesize` step message (`"Genereerin pilte 3/13..."`).
+
+If no OpenAI key is set, step 5 is skipped entirely. The renderer in step 7 falls back to a tinted placeholder rectangle with the prompt shown as a caption.
+
+### 6. Report (`src/main/services/report-builder.ts`)
+
+HTML template (`src/main/templates/report.html.ts`) interpolates the `SynthesisResult` + scraped data into an editorial PDF report. Playwright opens the HTML, renders it to PDF, and writes both files to `{outputDir}/{timestamp}-{projectName}/`. Default `outputDir` is `~/Desktop/stiilileidja-output`.
+
+The synthesis is also auto-persisted to `{outputDir}/projects/{id}.json` (typed as `SavedProjectData`) and listed in `InputView` under "Hiljutised projektid" for later re-opening.
+
+### 7. Moodboard (`src/main/services/figma-script.ts` + `mcp-figma.ts` / `mcp-paper.ts`)
+
+User picks an `OutputMode`:
+
+- **`figma-execute`** — renders live into Figma via MCP
+- **`paper-execute`** — renders into Pencil/Paper via MCP
+- **`figma-prompt`** / **`paper-prompt`** — outputs a copy-pasteable prompt + script for manual use
+
+Figma-execute in detail:
+
+1. `mcp-figma.ts` spawns `figma-console-mcp` (via `StdioClientTransport`). That MCP server advertises a WebSocket at `localhost:9225` and talks to Figma Desktop's Chrome DevTools Protocol on `localhost:9222`.
+2. The **Figma Desktop Bridge** plugin (must be open in Figma) connects to the WebSocket and forwards commands into Figma's plugin runtime sandbox.
+3. `figma-script.ts` serialises the entire `SynthesisResult` into a single JavaScript string that runs inside the plugin sandbox. The serialiser is a **generic DSL interpreter** — it does not contain any brand-specific logic.
+4. At runtime the script:
+   - Collects every `(fontFamily, fontWeight)` pair referenced across all directions, dedupes, then `await figma.loadFontAsync(...)` for each. **Critical rule**: fonts are loaded _after_ `figma.currentPage = page`, never before — fonts loaded before the page switch silently fail and text nodes render blank.
+   - Creates a new page named "Moodboard — {project}".
+   - Lays out 3 direction columns side-by-side at 1440px wide with an 80px gap.
+   - For each direction → iterate sections. For each section, creates a 1440×{sectionHeight} frame and calls `renderElement()` on each `VisualElement`.
+   - Dispatches by `kind`:
+     - `text` → `figma.createText` + font + letter/line spacing + text case transform
+     - `rect` → `figma.createRectangle` + fills + cornerRadius + stroke
+     - `ellipse` → `figma.createEllipse`
+     - `line` → `figma.createLine` from (x,y) to (x2,y2) with stroke
+     - `frame` → `figma.createFrame` + recurse into `children`
+     - `image` → resolve the image via `resolveImage(el)`:
+       - If `imageUrl` starts with `data:`, decode the base64 in-plugin with `atob` → `Uint8Array` → `figma.createImage(bytes)`.
+       - Otherwise `await figma.createImageAsync(imageUrl)`.
+       - Apply the resulting hash as a fill on a rectangle sized to the element's w/h.
+       - On failure (bad URL, rate-limit, etc.) draw a tinted placeholder rect with the prompt as a caption so the layout doesn't break.
+   - Zooms the viewport to fit all three columns.
+
+The Figma document now has three complete, unique, brand-specific page sketches. Designers can pick a direction, duplicate the frames, and iterate from there.
+
+### Where to change what
+
+| You want to change | Edit |
+|---|---|
+| What the AI decides (strategy, colours, copy) | `src/main/services/claude.ts` — the system prompt |
+| What element types are renderable | `src/shared/types.ts` (add to `VisualKind`) + `src/main/services/figma-script.ts` (add a renderer) |
+| Image quality / cost / model | `src/main/services/image-gen.ts` |
+| Which scrape data is captured | `src/main/services/scraper.ts` |
+| Progress UI / step wiring | `src/renderer/views/PipelineView.tsx` + `src/renderer/store/pipeline.store.ts` |
+| Report template | `src/main/templates/report.html.ts` |
 
 ## Project layout
 
