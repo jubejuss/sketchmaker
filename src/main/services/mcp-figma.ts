@@ -584,12 +584,15 @@ export async function executeFigmaMoodboard(
       const imageData = resolveImageData(source)
       if (!imageData) { done += nodeIds.length; continue }
       try {
+        // 120s per image: the Bridge plugin processes fills serially and each
+        // call can take ~60s when many images are queued. 30s caused every
+        // call after the first to time out silently, leaving grey rectangles.
         await withTimeout(
           client.callTool({
             name: 'figma_set_image_fill',
             arguments: { nodeIds, imageData, scaleMode: 'FILL' }
           }),
-          30000,
+          120000,
           'figma_set_image_fill'
         )
       } catch (err) {
