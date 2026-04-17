@@ -218,3 +218,31 @@ These invariants are enforced across `claude.ts`, `figma-script.ts`, and `image-
 - `SIGKILL`s the process and removes the port file if PPID=1 (orphan from a crashed Electron run)
 
 Without this cleanup, an orphan from a prior crash holds port 9223, the new daemon gets pushed to 9224+, and the port-file discovery polling times out → "pordi faili ei leita" error. The cleanup also catches Claude Desktop's figma-console-mcp orphans — acceptable trade-off because stale orphans block our own startup.
+
+## Troubleshooting
+
+### Figma moodboard rectangles render grey instead of images
+
+**Symptom**: Moodboard generates in Figma but every image rectangle is solid grey. The `figma_execute` script reports "success" and Claude returns a valid hash — no error logged anywhere.
+
+**Root cause**: Image fills applied from inside `figma_execute`'s eval sandbox never persist. Specifically:
+- `figma.createImage(bytes)` in the sandbox returns a valid-looking SHA1 hash, but the bytes are never uploaded to Figma's document-level image store. `r.fills = [{ type: 'IMAGE', imageHash }]` attaches that hash successfully, but the hash points at nothing → grey render.
+- `figma.createImageAsync(httpsUrl)` is blocked by the Desktop Bridge plugin's `manifest.json` `allowedDomains` → not an option for bypassing the sync API.
+- `atob` is undefined in the sandbox, so decoding a data URL in-script isn't even possible without a polyfill.
+
+**Fix**: Never apply image fills from `figma_execute`. Use the dedicated `figma_set_image_fill` MCP tool instead — it runs server-side in the persistent plugin context where `createImage` bytes survive. Flow is documented under "Figma image fill handoff" above.
+
+**Secondary gotcha**: MCP stdio silently truncates large parameter strings (> ~100 KB). This means embedding base64 data URLs in the `imageData` param also fails silently. `figma_set_image_fill` accepts absolute file paths starting with `/` as an alternative — the server reads the file from disk, bypassing the stdio limit. `image-gen.ts` writes every image to `$TMPDIR/stiilileidja-images/` for exactly this reason.
+
+**How to confirm the pipeline works before running full synthesis**: the debug probe button in Settings (`probeFigmaImages` IPC) writes a 32×32 red PNG, creates a rect via `figma_execute`, then applies the fill via `figma_set_image_fill`. If the rect renders solid red (not grey), the handoff is working end-to-end.
+
+### "Credit balance too low" despite funded balance
+
+**Symptom**: Synthesis call fails with Anthropic 400 `{"type":"invalid_request_error","message":"Your credit balance is too low..."}` even though platform.claude.com shows a positive balance and spend limits have headroom.
+
+**Root cause, usually one of**:
+1. **API key belongs to a different organization than the one you funded.** Anthropic keys are org-scoped; credit grants are org-scoped. A key from org A cannot spend credits sitting in org B, even if the same user owns both. platform.claude.com → API keys lists the org for each key. Generate a new key inside the funded org and paste into Settings.
+2. **Pre-flight cost reserve exceeds balance.** Anthropic reserves `input_cost + max_tokens × output_price` before streaming. With `max_tokens: 32000` on Sonnet 4.6 and a rich input (system + scrape + competitors → ~30K tokens), the reserve can approach $5 and reject a call against a small top-up. We cap `max_tokens` at 20000 in `claude.ts` to keep this reserve under $1. Don't raise it without comfortable balance headroom.
+3. **Propagation lag**: fresh top-ups can take 5–15 min to become visible to the API. If (1) and (2) check out, wait and retry.
+
+**Diagnostic**: `synthesis.ipc.ts` logs `[synthesize] apiKey present: true (sk-ant-api03-XXXXXX...)`. Match the 16-char prefix against the API keys list at platform.claude.com to see which org the key actually belongs to.
