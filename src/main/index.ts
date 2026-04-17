@@ -61,6 +61,12 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // Dock icon in dev: macOS ignores BrowserWindow.icon and shows Electron's own
+  // icon unless we override at runtime. Packaged builds use build/icon.icns via
+  // electron-builder; this handles `npm run dev`.
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(path.join(__dirname, '../../build/icon.png'))
+  }
   createWindow()
   // Start figma-console-mcp daemon immediately so the Figma Desktop Bridge plugin
   // can find it during its one-time port scan (9223–9232).
