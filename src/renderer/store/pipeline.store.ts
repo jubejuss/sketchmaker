@@ -88,7 +88,7 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
   seoWcagResult: null,
   reportPaths: null,
   moodboardResult: null,
-  outputMode: 'paper-prompt',
+  outputMode: 'pencil-prompt',
   competitorScope: 'regional',
   selectedSections: [...DEFAULT_SECTIONS],
   activeView: 'input',

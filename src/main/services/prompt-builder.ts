@@ -15,12 +15,12 @@ export function buildPrompt(data: MoodboardData, mode: OutputMode): GeneratedPro
 
   if (mode === 'figma-prompt') {
     return buildFigmaPrompt(data)
-  } else if (mode === 'paper-prompt') {
-    return buildPaperPrompt(data)
+  } else if (mode === 'pencil-prompt') {
+    return buildPencilPrompt(data)
   } else if (mode === 'figma-execute') {
     return buildFigmaExecute(data)
   } else {
-    return buildPaperExecute(data)
+    return buildPencilExecute(data)
   }
 }
 
@@ -97,15 +97,15 @@ ${styleRecommendations.map((r) => `**${r.type}:** ${r.value} — ${r.rationale}`
   }
 }
 
-function buildPaperPrompt(data: MoodboardData): GeneratedPrompt {
+function buildPencilPrompt(data: MoodboardData): GeneratedPrompt {
   const { synthesis, projectName } = data
   const { colorStrategy, suggestedFonts, moodboardKeywords, brandPersonality } = synthesis
 
   const moodboardHtml = buildMoodboardHtml(data)
 
-  const prompt = `Create a moodboard artboard in Paper/Pencil for "${projectName}".
+  const prompt = `Create a moodboard artboard in Pencil for "${projectName}".
 
-Use the Paper MCP tools in this sequence:
+Use the Pencil MCP tools in this sequence:
 1. get_basic_info — understand canvas
 2. create_artboard with name "Moodboard — ${projectName}", width: 1440, height: 900
 3. write_html with the following HTML content:
@@ -118,9 +118,9 @@ ${moodboardHtml}
 5. finish_working_on_nodes`
 
   return {
-    mode: 'paper-prompt',
-    title: `Paper Moodboard — ${projectName}`,
-    description: 'Copy this prompt into Claude Code with Paper MCP active',
+    mode: 'pencil-prompt',
+    title: `Pencil Moodboard — ${projectName}`,
+    description: 'Copy this prompt into Claude Code with Pencil MCP active',
     prompt
   }
 }
@@ -133,11 +133,11 @@ function buildFigmaExecute(data: MoodboardData): GeneratedPrompt {
   }
 }
 
-function buildPaperExecute(data: MoodboardData): GeneratedPrompt {
+function buildPencilExecute(data: MoodboardData): GeneratedPrompt {
   return {
-    ...buildPaperPrompt(data),
-    mode: 'paper-execute',
-    description: 'Executing directly via Paper MCP'
+    ...buildPencilPrompt(data),
+    mode: 'pencil-execute',
+    description: 'Executing directly via Pencil MCP'
   }
 }
 

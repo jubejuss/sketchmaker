@@ -3,23 +3,23 @@ import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
 import { checkFigmaAvailable, executeFigmaMoodboard, getFigmaStatus, probeFigmaImages } from '../services/mcp-figma.js'
-import { checkPaperAvailable, executePaperMoodboard } from '../services/mcp-paper.js'
+import { checkPencilAvailable, executePencilMoodboard } from '../services/mcp-pencil.js'
 import { buildPrompt } from '../services/prompt-builder.js'
 import store from '../store.js'
 import type { MoodboardData, OutputMode } from '../../shared/types.js'
 
 export function registerMoodboardIpc(mainWindow: BrowserWindow): void {
   ipcMain.handle('check-mcp-status', async () => {
-    const [figmaResult, paperResult, figmaStatus] = await Promise.all([
+    const [figmaResult, pencilResult, figmaStatus] = await Promise.all([
       checkFigmaAvailable().catch((e) => ({ ok: false, error: String(e) })),
-      checkPaperAvailable().catch((e) => ({ ok: false, error: String(e) })),
+      checkPencilAvailable().catch((e) => ({ ok: false, error: String(e) })),
       getFigmaStatus()
     ])
     return {
       figma: figmaResult.ok,
-      paper: paperResult.ok,
+      pencil: pencilResult.ok,
       figmaError: figmaResult.error,
-      paperError: paperResult.error,
+      pencilError: pencilResult.error,
       figmaPort: figmaStatus.port,
       figmaClients: figmaStatus.clients,
       figmaDaemonRunning: figmaStatus.running
@@ -61,17 +61,17 @@ export function registerMoodboardIpc(mainWindow: BrowserWindow): void {
       }
     }
 
-    if (mode === 'paper-execute') {
-      const check = await checkPaperAvailable()
+    if (mode === 'pencil-execute') {
+      const check = await checkPencilAvailable()
       if (!check.ok) {
         return {
           success: false,
-          fallback: 'paper-prompt',
-          message: check.error ?? 'Pencil/Paper ühendus ebaõnnestus.',
-          prompt: buildPrompt(enrichedData, 'paper-prompt')
+          fallback: 'pencil-prompt',
+          message: check.error ?? 'Pencil ühendus ebaõnnestus.',
+          prompt: buildPrompt(enrichedData, 'pencil-prompt')
         }
       }
-      const screenshot = await executePaperMoodboard(enrichedData, sendProgress)
+      const screenshot = await executePencilMoodboard(enrichedData, sendProgress)
       return { success: true, screenshot }
     }
 

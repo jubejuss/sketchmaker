@@ -4,32 +4,33 @@ import { execSync } from 'child_process'
 import type { MoodboardData } from '../../shared/types.js'
 import { buildMoodboardHtml } from './prompt-builder.js'
 
-// Paper.app ships its own MCP binary (uses --app desktop)
-// Pencil MCP binary (Cursor version) is fallback
-const PAPER_BINARY_BUNDLED = '/Applications/Paper.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64'
-const PAPER_BINARY_PENCIL = '/Users/juhokalberg/.pencil/mcp/cursor/out/mcp-server-darwin-arm64'
+// Pencil.app ships its own MCP bridge binary (stdio ↔ WebSocket, --app desktop).
+// The legacy copy at ~/.pencil/mcp/cursor/out/ is kept as fallback — same binary,
+// older install path.
+const PENCIL_BINARY_BUNDLED = '/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64'
+const PENCIL_BINARY_LEGACY = '/Users/juhokalberg/.pencil/mcp/cursor/out/mcp-server-darwin-arm64'
 
-function getPaperBinary(): { binary: string; app: string } {
+function getPencilBinary(): { binary: string; app: string } {
   try {
-    if (require('fs').existsSync(PAPER_BINARY_BUNDLED)) {
-      return { binary: PAPER_BINARY_BUNDLED, app: 'desktop' }
+    if (require('fs').existsSync(PENCIL_BINARY_BUNDLED)) {
+      return { binary: PENCIL_BINARY_BUNDLED, app: 'desktop' }
     }
   } catch {}
-  return { binary: PAPER_BINARY_PENCIL, app: 'desktop' }
+  return { binary: PENCIL_BINARY_LEGACY, app: 'desktop' }
 }
 
-function isPaperRunning(): boolean {
+function isPencilRunning(): boolean {
   try {
-    execSync('pgrep -x Paper 2>/dev/null || pgrep -x Pencil 2>/dev/null', { stdio: 'pipe' })
+    execSync('pgrep -x Pencil 2>/dev/null', { stdio: 'pipe' })
     return true
   } catch {
     return false
   }
 }
 
-function launchPaper(): void {
+function launchPencil(): void {
   try {
-    execSync('open -a Paper 2>/dev/null || open -a Pencil 2>/dev/null', { stdio: 'pipe' })
+    execSync('open -a Pencil 2>/dev/null', { stdio: 'pipe' })
   } catch {}
 }
 
@@ -37,21 +38,21 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Paper timeout (${ms}ms) — is Pencil app open?`)), ms)
+      setTimeout(() => reject(new Error(`Pencil timeout (${ms}ms) — is Pencil app open?`)), ms)
     )
   ])
 }
 
-export async function checkPaperAvailable(): Promise<{ ok: boolean; error?: string }> {
-  if (!isPaperRunning()) {
+export async function checkPencilAvailable(): Promise<{ ok: boolean; error?: string }> {
+  if (!isPencilRunning()) {
     return {
       ok: false,
-      error: 'Paper rakendus ei tööta. Ava /Applications/Paper.app käsitsi.'
+      error: 'Pencil rakendus ei tööta. Ava /Applications/Pencil.app käsitsi.'
     }
   }
   let client: Client | null = null
   try {
-    client = await connectPaper()
+    client = await connectPencil()
     await withTimeout(
       client.callTool({ name: 'get_basic_info', arguments: {} }),
       5000
@@ -59,7 +60,7 @@ export async function checkPaperAvailable(): Promise<{ ok: boolean; error?: stri
     return { ok: true }
   } catch (err) {
     const msg = (err as Error).message
-    console.log('[paper] availability check failed:', msg)
+    console.log('[pencil] availability check failed:', msg)
     return { ok: false, error: msg }
   } finally {
     if (client) {
@@ -68,9 +69,9 @@ export async function checkPaperAvailable(): Promise<{ ok: boolean; error?: stri
   }
 }
 
-async function connectPaper(): Promise<Client> {
-  const { binary, app } = getPaperBinary()
-  console.log(`[paper] Using binary: ${binary} --app ${app}`)
+async function connectPencil(): Promise<Client> {
+  const { binary, app } = getPencilBinary()
+  console.log(`[pencil] Using binary: ${binary} --app ${app}`)
   const transport = new StdioClientTransport({
     command: binary,
     args: ['--app', app],
@@ -88,26 +89,26 @@ async function connectPaper(): Promise<Client> {
   return client
 }
 
-export async function executePaperMoodboard(
+export async function executePencilMoodboard(
   data: MoodboardData,
   onProgress: (msg: string) => void
 ): Promise<string | null> {
-  if (!isPaperRunning()) {
+  if (!isPencilRunning()) {
     onProgress('Käivitan Pencil rakenduse...')
-    launchPaper()
+    launchPencil()
     // Wait up to 8s for the app to start
     let ready = false
     for (let i = 0; i < 16; i++) {
       await new Promise(r => setTimeout(r, 500))
-      if (isPaperRunning()) { ready = true; break }
+      if (isPencilRunning()) { ready = true; break }
     }
-    if (!ready) throw new Error('Paper ei käivitu. Ava rakendus käsitsi: /Applications/Paper.app')
+    if (!ready) throw new Error('Pencil ei käivitu. Ava rakendus käsitsi: /Applications/Pencil.app')
     // Give it a couple extra seconds to fully initialize
     await new Promise(r => setTimeout(r, 2000))
   }
 
   onProgress('Ühendan Pencil rakendusega...')
-  const client = await connectPaper()
+  const client = await connectPencil()
 
   try {
     onProgress('Reading canvas info...')

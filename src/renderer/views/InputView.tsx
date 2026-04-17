@@ -549,9 +549,9 @@ function OutputModeSelector({
   onChange: (v: ReturnType<typeof value extends string ? () => never : never>) => void
 }): React.ReactElement {
   const options = [
-    { id: 'paper-execute', label: 'Pencil', sub: 'Käivita otse', icon: '✦' },
+    { id: 'pencil-execute', label: 'Pencil', sub: 'Käivita otse', icon: '✦' },
     { id: 'figma-execute', label: 'Figma', sub: 'Käivita otse', icon: '◈' },
-    { id: 'paper-prompt', label: 'Pencil prompt', sub: 'Kopeeri käsitsi', icon: '✧' },
+    { id: 'pencil-prompt', label: 'Pencil prompt', sub: 'Kopeeri käsitsi', icon: '✧' },
     { id: 'figma-prompt', label: 'Figma prompt', sub: 'Kopeeri käsitsi', icon: '◇' }
   ]
 

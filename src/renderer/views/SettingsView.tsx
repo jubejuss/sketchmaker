@@ -28,8 +28,8 @@ export default function SettingsView(): React.ReactElement {
   const [saved, setSaved] = useState(false)
   const [loading, setLoading] = useState(true)
   const [mcpStatus, setMcpStatus] = useState<{
-    figma?: boolean; paper?: boolean;
-    figmaError?: string; paperError?: string;
+    figma?: boolean; pencil?: boolean;
+    figmaError?: string; pencilError?: string;
     figmaPort?: number | null; figmaClients?: number; figmaDaemonRunning?: boolean
   } | null>(null)
   const [mcpTesting, setMcpTesting] = useState(false)
@@ -427,31 +427,31 @@ export default function SettingsView(): React.ReactElement {
                 )}
               </div>
 
-              {/* Paper/Pencil status */}
+              {/* Pencil status */}
               <div style={{
                 padding: '10px 14px',
-                background: mcpStatus.paper ? 'rgba(90,158,122,0.08)' : 'rgba(192,80,74,0.08)',
-                border: `1px solid ${mcpStatus.paper ? 'rgba(90,158,122,0.35)' : 'rgba(192,80,74,0.3)'}`,
+                background: mcpStatus.pencil ? 'rgba(90,158,122,0.08)' : 'rgba(192,80,74,0.08)',
+                border: `1px solid ${mcpStatus.pencil ? 'rgba(90,158,122,0.35)' : 'rgba(192,80,74,0.3)'}`,
                 borderRadius: 7
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: mcpStatus.paperError ? 6 : 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: mcpStatus.pencilError ? 6 : 0 }}>
                   <span style={{
                     width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                    background: mcpStatus.paper ? 'var(--success)' : 'var(--error)'
+                    background: mcpStatus.pencil ? 'var(--success)' : 'var(--error)'
                   }} />
                   <span style={{
                     fontFamily: 'var(--display)', fontSize: 12, fontWeight: 600,
-                    color: mcpStatus.paper ? 'var(--success)' : 'var(--error)'
+                    color: mcpStatus.pencil ? 'var(--success)' : 'var(--error)'
                   }}>
-                    Pencil: {mcpStatus.paper ? 'OK' : 'Ei vasta'}
+                    Pencil: {mcpStatus.pencil ? 'OK' : 'Ei vasta'}
                   </span>
                 </div>
-                {mcpStatus.paperError && (
+                {mcpStatus.pencilError && (
                   <div style={{
                     fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)',
                     lineHeight: 1.5, marginLeft: 15
                   }}>
-                    {mcpStatus.paperError}
+                    {mcpStatus.pencilError}
                   </div>
                 )}
               </div>
@@ -769,14 +769,12 @@ const SETUP_SECTIONS: SetupSection[] = [
   },
   {
     id: 'pencil',
-    title: 'Pencil/Paper (otse käivitus)',
+    title: 'Pencil (otse käivitus)',
     badge: 'Execute',
     badgeColor: '#5a7fc0',
     steps: [
       {
-        text: 'Pencil (Paper) rakendus peab olema avatud ja aktiivne',
-        url: 'https://paperdraw.app',
-        urlLabel: 'Paper veebileht'
+        text: 'Pencil rakendus peab olema avatud ja aktiivne (/Applications/Pencil.app)'
       },
       {
         text: 'MCP server käivitub automaatselt — eraldi seadistust pole vaja'

@@ -1,7 +1,7 @@
 {
   "name": "stiilileidja",
   "version": "0.1.0",
-  "description": "Moodboard and stylescape generator for Figma and Paper",
+  "description": "Moodboard and stylescape generator for Figma and Pencil",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {

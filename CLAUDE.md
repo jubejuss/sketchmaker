@@ -9,7 +9,7 @@ Desktop tool for designers. Given a client website URL or creative brief, it:
 4. Synthesizes brand strategy + element-level visual DSL (3 directions) via Claude
 5. Generates moodboard imagery via Pexels (default) or OpenAI Images API (`gpt-image-1`) — user-selectable
 6. Generates a PDF/HTML report
-7. Renders the DSL as a live moodboard in Figma or Pencil (Paper) via MCP
+7. Renders the DSL as a live moodboard in Figma or Pencil via MCP
 
 ## Tech Stack
 
@@ -23,7 +23,7 @@ Desktop tool for designers. Given a client website URL or creative brief, it:
 - **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — alternative when user needs AI-generated scenes. Returns base64 PNG → written to a temp file before handoff to Figma.
 - **jsonrepair** — fallback for malformed synthesis JSON (unescaped quotes/newlines in long outputs)
 - **figma-console-mcp** (local, StdioClientTransport) for Figma integration
-- **Paper MCP binary** for Pencil/Paper integration
+- **Pencil MCP binary** (stdio ↔ WebSocket bridge, shipped inside `Pencil.app`) for moodboard rendering in Pencil
 - **electron-store** for settings persistence
 
 ## Key Paths (Machine-Specific)
@@ -32,7 +32,8 @@ These are hardcoded to the dev machine — do not change without verifying:
 
 - figma-console-mcp: `/Users/juhokalberg/.nvm/versions/node/v20.19.2/lib/node_modules/figma-console-mcp/dist/local.js`
 - Node binary: `/Users/juhokalberg/.nvm/versions/node/v20.19.2/bin/node`
-- Paper MCP binary: `/Users/juhokalberg/.pencil/mcp/cursor/out/mcp-server-darwin-arm64`
+- Pencil MCP binary (canonical, bundled inside Pencil.app): `/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64`
+- Pencil MCP binary (legacy Cursor copy, used as fallback by `mcp-pencil.ts`): `/Users/juhokalberg/.pencil/mcp/cursor/out/mcp-server-darwin-arm64`
 
 ## Project Structure
 
@@ -59,7 +60,7 @@ src/
       pexels.ts               # Pexels /v1/search wrapper — orientation + deterministic photo pick (hash of prompt → index)
       report-builder.ts       # HTML template → PDF (playwright)
       mcp-figma.ts            # StdioClientTransport → figma-console-mcp
-      mcp-paper.ts            # StdioClientTransport → Paper binary
+      mcp-pencil.ts           # StdioClientTransport → Pencil bridge binary (stdio ↔ WebSocket, --app desktop)
       prompt-builder.ts       # Serialize results → copy-pasteable prompts + Figma script
       figma-script.ts         # Figma execute() code generator — generic DSL interpreter
     templates/
@@ -125,6 +126,17 @@ The active image source is chosen via the `imageSource` setting (`'pexels' | 'op
 This is the same plugin used by Claude Desktop's figma-console-mcp. When the plugin is open, both Claude Desktop and this app can use it.
 
 If Figma plugin shows "Connect" button + pairing code = Cloud Mode. The local MCP (port 9222) works regardless of Cloud/Local mode setting, as long as the plugin is OPEN.
+
+## Pencil MCP Requirements
+
+`mcp-pencil.ts` spawns the Pencil bridge binary — a stdio ↔ WebSocket proxy. The binary reads a port from `~/.pencil/apps/<name>` (where `<name>` is the `--app` flag value) and opens a WebSocket to whatever is listening there. It does NOT serve MCP itself; a running app instance is required.
+
+- **Pencil.app** registers itself as `desktop` → correct flag is `--app desktop`.
+- The **Cursor companion extension** registers as `cursor` — irrelevant for this project.
+- Pencil.app must be running; otherwise the port file either doesn't exist or points at a dead port.
+- Canonical binary path is inside the Pencil.app bundle (`/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64`). `~/.pencil/mcp/cursor/out/…` is a legacy copy kept as fallback.
+
+**Paper.app is not Pencil.app.** `/Applications/Paper.app` (ToDesktop packager, bundle id `com.todesktop.2601167vjw8xe`, version 0.1.x) is the pre-rebrand build. It ships NO MCP binary and does NOT register a port in `~/.pencil/apps/`. The codebase now targets Pencil exclusively — `mcp-pencil.ts` only checks `pgrep -x Pencil` and only opens `open -a Pencil`. Uninstall Paper.app to avoid confusion.
 
 ## Claude Synthesis Call
 
@@ -268,3 +280,33 @@ Without this cleanup, an orphan from a prior crash holds port 9223, the new daem
 3. **Propagation lag**: fresh top-ups can take 5–15 min to become visible to the API. If (1) and (2) check out, wait and retry.
 
 **Diagnostic**: `synthesis.ipc.ts` logs `[synthesize] apiKey present: true (sk-ant-api03-XXXXXX...)`. Match the 16-char prefix against the API keys list at platform.claude.com to see which org the key actually belongs to.
+
+### Pencil MCP "Failed to reconnect"
+
+**Symptom**: `claude mcp list` or Claude Code's `/mcp` reports `pencil: ✗ Failed to connect`, or the in-app "Test Pencil" check errors out, even though Pencil.app is open.
+
+**Common causes**:
+
+1. **Wrong `--app` flag.** `--app cursor` reads `~/.pencil/apps/cursor` (port written by Cursor's companion, usually absent). For Pencil.app use `--app desktop`.
+2. **Pencil.app not running.** The bridge binary has no WebSocket to attach to — launch Pencil.app first. `pgrep -x Pencil` must return a PID.
+3. **Stale / missing binary path.** `~/.pencil/mcp/cursor/out/mcp-server-darwin-arm64` is a legacy copy and may disappear after updates. Prefer the bundled path at `/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64`.
+4. **Claude Code session cache.** Claude Code loads `~/.claude.json` mcpServers at session launch. Edits take effect on the next session — `/mcp` reconnect in the current session uses the cached snapshot. Quit and relaunch Claude Code after editing MCP config.
+5. **Paper.app confusion.** `/Applications/Paper.app` is the deprecated ToDesktop-packaged predecessor — it has no bundled MCP binary and doesn't register a port. Running it instead of Pencil.app won't help.
+6. **Port drift after app restart.** Pencil.app picks a fresh random port on each launch and rewrites `~/.pencil/apps/desktop`. If a stdio bridge was spawned against a prior port and the app was relaunched, the bridge is stale. Restart the caller (Claude Code session, or the in-app MCP test).
+
+**Verify the port file matches reality**:
+```bash
+cat ~/.pencil/apps/desktop               # port Pencil.app wrote
+lsof -iTCP -sTCP:LISTEN -P | grep Pencil # port Pencil.app is actually listening on
+```
+The two must match, and port file + listening process must be from the same running instance.
+
+**Canonical global MCP config entry** (`~/.claude.json`):
+```json
+"pencil": {
+  "type": "stdio",
+  "command": "/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64",
+  "args": ["--app", "desktop"],
+  "env": {}
+}
+```

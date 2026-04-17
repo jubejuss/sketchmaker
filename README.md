@@ -2,7 +2,7 @@
 
 **Repo:** https://github.com/jubejuss/sketchmaker
 
-Desktop moodboard generator for designers. Point it at a client URL (or paste a brief), it scrapes the site, analyses competitors, runs a single Claude call that outputs three radically different visual directions as a bespoke element-level DSL, fills the image placeholders from either **Pexels** (stock photos, default) or **OpenAI `gpt-image-1`** (AI-generated), then renders everything live into Figma or Pencil (Paper) via MCP.
+Desktop moodboard generator for designers. Point it at a client URL (or paste a brief), it scrapes the site, analyses competitors, runs a single Claude call that outputs three radically different visual directions as a bespoke element-level DSL, fills the image placeholders from either **Pexels** (stock photos, default) or **OpenAI `gpt-image-1`** (AI-generated), then renders everything live into Figma or Pencil via MCP.
 
 No layout templates — every pixel spec is authored by Claude per brand.
 
@@ -14,7 +14,7 @@ No layout templates — every pixel spec is authored by Claude per brand.
 - **Anthropic SDK** (`claude-sonnet-4-6`, streaming) + **jsonrepair** fallback for malformed synthesis JSON
 - **Pexels API v1** — default image source, stock photography, 200 req/hr free
 - **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — optional AI-generated imagery
-- **MCP**: `figma-console-mcp` (Figma Desktop Bridge plugin, CDP :9222 + WS :9225) and Paper MCP binary
+- **MCP**: `figma-console-mcp` (Figma Desktop Bridge plugin, CDP :9222 + WS :9225) and Pencil MCP bridge binary (stdio ↔ WebSocket, shipped inside Pencil.app)
 - **electron-store** — encrypted settings persistence
 
 ## Quick start
@@ -104,9 +104,9 @@ Pick the report/moodboard output language in **Seaded → Väljundi keel** (Eest
 3. Open the plugin (`Plugins → Development → Figma Desktop Bridge`) and set it to **Local Mode**
 4. Keep the plugin window open while running a moodboard — it bridges Figma's plugin runtime to the app
 
-### Pencil (Paper) MCP
+### Pencil MCP
 
-Just run Pencil/Paper. The MCP binary is spawned automatically.
+Just run Pencil.app. The MCP bridge binary (stdio ↔ WebSocket, shipped inside the app bundle at `/Applications/Pencil.app/Contents/Resources/app.asar.unpacked/out/mcp-server-darwin-arm64`) is spawned automatically and connects back to the running app with `--app desktop`. `Paper.app` is the deprecated predecessor and is not supported — it ships no MCP binary.
 
 ## How the full pipeline works — from input to sketches
 
@@ -223,13 +223,13 @@ HTML template (`src/main/templates/report.html.ts`) interpolates the `SynthesisR
 
 The synthesis is also auto-persisted to `{outputDir}/projects/{id}.json` (typed as `SavedProjectData`) and listed in `InputView` under "Hiljutised projektid" for later re-opening.
 
-### 7. Moodboard (`src/main/services/figma-script.ts` + `mcp-figma.ts` / `mcp-paper.ts`)
+### 7. Moodboard (`src/main/services/figma-script.ts` + `mcp-figma.ts` / `mcp-pencil.ts`)
 
 User picks an `OutputMode`:
 
 - **`figma-execute`** — renders live into Figma via MCP
-- **`paper-execute`** — renders into Pencil/Paper via MCP
-- **`figma-prompt`** / **`paper-prompt`** — outputs a copy-pasteable prompt + script for manual use
+- **`pencil-execute`** — renders into Pencil via MCP
+- **`figma-prompt`** / **`pencil-prompt`** — outputs a copy-pasteable prompt + script for manual use
 
 Figma-execute in detail:
 
@@ -279,7 +279,7 @@ src/
       pexels.ts      Pexels API v1 search client
       figma-script.ts   Generic DSL → Figma plugin code (placeholder fills + __SL_IMG_REQUESTS)
       mcp-figma.ts      StdioClientTransport → figma-console-mcp; applies real image fills via figma_set_image_fill
-      mcp-paper.ts      StdioClientTransport → Paper binary
+      mcp-pencil.ts     StdioClientTransport → Pencil bridge binary (stdio ↔ WebSocket, --app desktop)
   preload/           contextBridge → window.stiilileidja
   renderer/
     views/           InputView · PipelineView · ResultsView · SettingsView
@@ -334,7 +334,7 @@ interface VisualElement {
 
 ### Renderer
 - `figma-script.ts` supports only the base DSL today. Adding `gradient` fills, `effects` (shadows, blurs), component instances, or Auto Layout would let Claude specify richer outputs.
-- Pencil/Paper output currently just writes HTML. A true DSL interpreter for Paper would give parity with Figma.
+- Pencil output currently just writes HTML. A true DSL interpreter for Pencil would give parity with Figma.
 
 ### Pipeline
 - Parallelise `scrape` and `research` — they don't depend on each other.

@@ -28,8 +28,8 @@ interface StiilileidjaAPI {
   generateReport: (data: ReportData) => Promise<{ htmlPath: string; pdfPath: string }>
   generateMoodboard: (data: MoodboardData, mode: OutputMode) => Promise<unknown>
   checkMcpStatus: () => Promise<{
-    figma: boolean; paper: boolean;
-    figmaError?: string; paperError?: string;
+    figma: boolean; pencil: boolean;
+    figmaError?: string; pencilError?: string;
     figmaPort?: number | null; figmaClients?: number; figmaDaemonRunning?: boolean
   }>
   probeFigmaImages: () => Promise<{ ok: boolean; result?: unknown; error?: string }>

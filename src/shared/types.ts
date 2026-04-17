@@ -181,7 +181,7 @@ export interface ReportData {
   language?: OutputLanguage
 }
 
-export type OutputMode = 'figma-execute' | 'paper-execute' | 'figma-prompt' | 'paper-prompt'
+export type OutputMode = 'figma-execute' | 'pencil-execute' | 'figma-prompt' | 'pencil-prompt'
 
 export interface MoodboardData {
   synthesis: SynthesisResult

@@ -375,7 +375,7 @@ export default function ResultsView(): React.ReactElement {
               padding: 3,
               marginRight: 8
             }}>
-              {(['paper-execute', 'figma-execute', 'paper-prompt', 'figma-prompt'] as OutputMode[]).map((m) => (
+              {(['pencil-execute', 'figma-execute', 'pencil-prompt', 'figma-prompt'] as OutputMode[]).map((m) => (
                 <button
                   key={m}
                   onClick={() => setOutputMode(m)}
