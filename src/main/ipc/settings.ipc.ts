@@ -8,6 +8,7 @@ export function registerSettingsIpc(): void {
       authMode: store.get('authMode') || 'api-key',
       researchMode: store.get('researchMode') || 'ahrefs',
       imageSource: store.get('imageSource') || 'pexels',
+      outputLanguage: store.get('outputLanguage') || 'et',
       anthropicApiKey: store.get('anthropicApiKey') || '',
       ahrefsApiKey: store.get('ahrefsApiKey') || '',
       figmaAccessToken: store.get('figmaAccessToken') || '',
@@ -21,6 +22,7 @@ export function registerSettingsIpc(): void {
     if (settings.authMode !== undefined) store.set('authMode', settings.authMode)
     if (settings.researchMode !== undefined) store.set('researchMode', settings.researchMode)
     if (settings.imageSource !== undefined) store.set('imageSource', settings.imageSource)
+    if (settings.outputLanguage !== undefined) store.set('outputLanguage', settings.outputLanguage)
     if (settings.anthropicApiKey !== undefined) store.set('anthropicApiKey', settings.anthropicApiKey)
     if (settings.ahrefsApiKey !== undefined) store.set('ahrefsApiKey', settings.ahrefsApiKey)
     if (settings.figmaAccessToken !== undefined) store.set('figmaAccessToken', settings.figmaAccessToken)

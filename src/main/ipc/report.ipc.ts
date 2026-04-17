@@ -6,7 +6,12 @@ import type { ReportData } from '../../shared/types.js'
 export function registerReportIpc(): void {
   ipcMain.handle('generate-report', async (_event, data: ReportData) => {
     const outputDir = store.get('outputDir') || undefined
-    const result = await generateReport({ ...data, outputDir: outputDir ?? data.outputDir })
+    const language = data.language ?? store.get('outputLanguage')
+    const result = await generateReport({
+      ...data,
+      outputDir: outputDir ?? data.outputDir,
+      language
+    })
 
     // Auto-open PDF
     shell.openPath(result.pdfPath)
