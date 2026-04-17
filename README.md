@@ -31,6 +31,7 @@ Production build:
 ```bash
 npm run build      # type-check + bundle
 npm run dist       # + electron-builder installer
+npm run icon:build # regenerate app icon from build/icon.svg
 npx tsc --noEmit   # standalone type check
 ```
 
@@ -47,6 +48,8 @@ All keys are configured in the app's **Seaded** (Settings) view — not in env v
 | `figmaAccessToken` | figma.com → Settings → Security → Personal access tokens | Moodboard rendering in Figma |
 
 Pick the image source in **Seaded → Image source** (Pexels or OpenAI). Without a key for the selected source, image placeholders render as tinted rects with the prompt as a caption.
+
+Pick the report/moodboard output language in **Seaded → Väljundi keel** (Eesti / English). Affects the PDF report, moodboard HTML labels, Figma canvas/page names, and Claude's narrative text (brandVoice, concepts, copy rendered on sketches, SEO/WCAG summaries). The app UI stays in Estonian. Stored on the `outputLanguage` setting, passed through every pipeline call that produces user-facing output. Resolved to i18n strings via `outputStrings(lang)` in `src/shared/i18n.ts`.
 
 > Anthropic OAuth tokens (`sk-ant-oat…`) are blocked for third-party apps since Jan 2026. Use API keys from platform.claude.com.
 
@@ -148,7 +151,7 @@ After Claude finishes, `generateImagesForDirections(source, keys, directions, on
 
 Source is chosen in settings and defaults to **Pexels**. Dispatch happens per-image with concurrency capped at **3**.
 
-**Pexels (`src/main/services/pexels.ts`).** Hits `GET https://api.pexels.com/v1/search?query=…&per_page=15&orientation=…&size=large` with `Authorization: <key>`. Orientation is picked from the element's aspect ratio (`landscape` / `portrait` / `square`). A deterministic hash of the prompt picks one photo from the returned set so reruns stay stable. The `large` src (~940px long edge) is used — plenty for moodboards and small enough to keep the Figma execute script under ~100 KB even with 15 images. Prompt is used raw (concrete keywords search better than stylistic phrasing). 200 req/hr per key on the free tier.
+**Pexels (`src/main/services/pexels.ts`).** Hits `GET https://api.pexels.com/v1/search?query=…&per_page=15&orientation=…&size=large` with `Authorization: <key>`. Orientation is picked from the element's aspect ratio (`landscape` / `portrait` / `square`). A deterministic hash of the prompt picks one photo from the returned set so reruns stay stable. The `large` src (~940px long edge) is downloaded and cached to `$TMPDIR/stiilileidja-images/<sha1(prompt).slice(0,16)>.<ext>`. Prompt is used raw (concrete keywords search better than stylistic phrasing). 200 req/hr per key on the free tier.
 
 **OpenAI.** Enriches each prompt with direction context so images stay on-brand:
 ```
@@ -158,9 +161,9 @@ Palette cues: <top 3 hexes>
 Mood: <top 3 mood words>
 Style: editorial, high quality, no text overlays, no watermarks.
 ```
-Picks a size from the element's aspect ratio: `1024×1024`, `1536×1024` (landscape), or `1024×1536` (portrait). Calls `POST https://api.openai.com/v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`. Returned base64 is wrapped as `data:image/png;base64,…`.
+Picks a size from the element's aspect ratio: `1024×1024`, `1536×1024` (landscape), or `1024×1536` (portrait). Calls `POST https://api.openai.com/v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`. Retries on 429/5xx with exponential backoff. Returned `b64_json` PNG is decoded and written to the same `$TMPDIR/stiilileidja-images/` file-path convention; if the API returns `url` instead, it is downloaded.
 
-In both cases the resulting URL is assigned to `element.imageUrl`. Progress events (`synthesis:image-progress`) stream to the renderer and update the `synthesize` step message (`"Genereerin pilte 3/13..."`).
+In both cases the **absolute temp-file path** is assigned to `element.imageUrl` — not a data URL, not an https URL. This is required by the Figma handoff: MCP stdio silently truncates large param strings, so `figma_set_image_fill` reads the bytes from disk rather than receiving them inline. The temp directory is wiped after the moodboard completes via `cleanupImageTempFiles()`. Progress events (`synthesis:image-progress`) stream to the renderer and update the `synthesize` step message (`"Genereerin pilte 3/13..."`).
 
 **OpenAI model access gotcha.** `gpt-image-1` is gated at **two levels** and both must be open:
 - Org must be verified (platform.openai.com → Settings → Organization → General → Verifications)
@@ -190,8 +193,8 @@ Figma-execute in detail:
 2. The **Figma Desktop Bridge** plugin (must be open in Figma) connects to the WebSocket and forwards commands into Figma's plugin runtime sandbox.
 3. `figma-script.ts` serialises the entire `SynthesisResult` into a single JavaScript string that runs inside the plugin sandbox. The serialiser is a **generic DSL interpreter** — it does not contain any brand-specific logic.
 4. At runtime the script:
-   - Collects every `(fontFamily, fontWeight)` pair referenced across all directions, dedupes, then `await figma.loadFontAsync(...)` for each. **Critical rule**: fonts are loaded _after_ `figma.currentPage = page`, never before — fonts loaded before the page switch silently fail and text nodes render blank.
-   - Creates a new page named "Moodboard — {project}".
+   - Collects every `(fontFamily, fontWeight)` pair referenced across all directions, dedupes, then `await figma.loadFontAsync(...)` for each. **Critical rule**: fonts are loaded _after_ `figma.setCurrentPageAsync(page)`, never before — fonts loaded before the page switch silently fail and text nodes render blank.
+   - Creates a new page named per `outputLanguage` (`Stiilivisandid — {project}` / `Style Sketches — {project}`).
    - Lays out 3 direction columns side-by-side at 1440px wide with an 80px gap.
    - For each direction → iterate sections. For each section, creates a 1440×{sectionHeight} frame and calls `renderElement()` on each `VisualElement`.
    - Dispatches by `kind`:
@@ -200,12 +203,9 @@ Figma-execute in detail:
      - `ellipse` → `figma.createEllipse`
      - `line` → `figma.createLine` from (x,y) to (x2,y2) with stroke
      - `frame` → `figma.createFrame` + recurse into `children`
-     - `image` → resolve the image via `resolveImage(el)`:
-       - If `imageUrl` starts with `data:`, decode the base64 in-plugin with `atob` → `Uint8Array` → `figma.createImage(bytes)`.
-       - Otherwise `await figma.createImageAsync(imageUrl)`.
-       - Apply the resulting hash as a fill on a rectangle sized to the element's w/h.
-       - On failure (bad URL, rate-limit, etc.) draw a tinted placeholder rect with the prompt as a caption so the layout doesn't break.
+     - `image` → creates a rectangle with a grey placeholder fill and pushes `{ nodeId, url: el.imageUrl }` onto `__SL_IMG_REQUESTS`. The sandbox **cannot** apply real image fills: `figma.createImage(bytes)` returns a hash but the bytes never reach Figma's document image store, and `figma.createImageAsync(httpsUrl)` is blocked by the plugin manifest's allowedDomains. The script returns the request list at the end.
    - Zooms the viewport to fit all three columns.
+5. Back in the main process, `mcp-figma.ts` groups the `__SL_IMG_REQUESTS` by source (same url → one call, multiple nodeIds) and invokes `figma_set_image_fill` per group. That MCP tool runs server-side in the persistent plugin context where `createImage` bytes survive — it reads the bytes from the absolute file path and applies them as a `FILL`-scaled image fill. Timeout per call is **120 s**: the Bridge plugin processes fills serially and a single call can take ~60 s when many images are queued; the earlier 30 s cap left every call after the first timing out with grey rectangles. Progress events (`moodboard:progress`) stream `"Lisan pildi X/N..."` updates to the renderer.
 
 The Figma document now has three complete, unique, brand-specific page sketches. Designers can pick a direction, duplicate the frames, and iterate from there.
 
@@ -219,6 +219,8 @@ The Figma document now has three complete, unique, brand-specific page sketches.
 | Which scrape data is captured | `src/main/services/scraper.ts` |
 | Progress UI / step wiring | `src/renderer/views/PipelineView.tsx` + `src/renderer/store/pipeline.store.ts` |
 | Report template | `src/main/templates/report.html.ts` |
+| UI labels in report/moodboard/Figma (et/en) | `src/shared/i18n.ts` — add new fields to `OutputStrings` + both tables |
+| App icon | `build/icon.svg` (source) → `npm run icon:build` regenerates `.icns`/`.png`/iconset |
 
 ## Project layout
 
@@ -229,16 +231,24 @@ src/
     services/        Business logic
       claude.ts      Synthesis prompt + streaming
       scraper.ts     Playwright
-      image-gen.ts   Image dispatcher (Pexels | OpenAI) — fills element.imageUrl
+      image-gen.ts   Image dispatcher (Pexels | OpenAI) — writes temp files, fills element.imageUrl with absolute paths
       pexels.ts      Pexels API v1 search client
-      figma-script.ts  Generic DSL → Figma plugin code
-      mcp-figma.ts   StdioClientTransport → figma-console-mcp
-      mcp-paper.ts   StdioClientTransport → Paper binary
+      figma-script.ts   Generic DSL → Figma plugin code (placeholder fills + __SL_IMG_REQUESTS)
+      mcp-figma.ts      StdioClientTransport → figma-console-mcp; applies real image fills via figma_set_image_fill
+      mcp-paper.ts      StdioClientTransport → Paper binary
   preload/           contextBridge → window.stiilileidja
   renderer/
     views/           InputView · PipelineView · ResultsView · SettingsView
     store/           Zustand pipeline store
-  shared/types.ts    All TypeScript types (single source of truth)
+  shared/
+    types.ts         All TypeScript types (single source of truth)
+    i18n.ts          Output-language string table (et/en) for report, moodboard, Figma labels
+scripts/
+  generate-icon.ts   Rasterises build/icon.svg → iconset PNGs + .icns + .png (playwright + iconutil)
+  probe-figma-images.ts  Debug probe for the figma_set_image_fill handoff
+build/
+  icon.svg           Source SVG for the app icon (tracked)
+  icon.icns / icon.png   Generated, tracked; referenced by electron-builder
 ```
 
 ## Visual DSL (`src/shared/types.ts`)
@@ -270,11 +280,11 @@ interface VisualElement {
 ### Model / synthesis
 - **Prompt tuning** — the system prompt in `src/main/services/claude.ts` controls design quality. Most improvements happen here. Iterate on section requirements, element density, typography hierarchy rules, colour rationale format.
 - **Structured outputs** — consider migrating from JSON-in-markdown parsing to Anthropic's native structured outputs for fewer parse failures.
-- **Token budget** — `max_tokens: 32000`. Bigger DSL output = richer moodboards but slower/pricier runs.
+- **Token budget** — `max_tokens: 28000`. Raising it makes outputs richer but the Anthropic pre-flight cost reserve (`input_cost + max_tokens × output_price`) scales with it — see CLAUDE.md "Credit balance too low" for context. Dropping below ~24k risks `stop_reason: 'max_tokens'` truncation on brand-heavy runs.
 
 ### Image generation
 - Currently on `gpt-image-1` at `quality: medium`. Bump to `high` for richer output at higher cost, or drop to `low` for cheap drafts. Edit `src/main/services/image-gen.ts`.
-- Add a persistent image cache by prompt hash (currently only the in-memory `imageHash` on each element) so repeated runs on the same brief reuse images across sessions.
+- The temp-file cache in `$TMPDIR/stiilileidja-images/` is wiped after each moodboard. A persistent cache keyed by `sha1(prompt)` would let repeated runs on the same brief reuse images across sessions — the filename convention is already content-addressable, only `cleanupImageTempFiles()` is in the way.
 - Try a faster local model (SDXL Turbo, Flux.1-schnell) via Replicate for cost control.
 - Fall back to `dall-e-3` automatically on `gpt-image-1` 403s to support projects where only the older model is allow-listed.
 

@@ -77,14 +77,23 @@ src/
       pipeline.store.ts       # Zustand: all pipeline state
   shared/
     types.ts                  # All shared TypeScript interfaces
+    i18n.ts                   # Output-language string tables (et/en) for report, moodboard, Figma labels
+scripts/
+  generate-icon.ts            # build/icon.svg → iconset PNGs + .icns + .png (playwright + iconutil)
+  probe-figma-images.ts       # Debug probe for the figma_set_image_fill handoff
+build/
+  icon.svg                    # App icon source (tracked)
+  icon.icns / icon.png        # Generated; referenced by electron-builder and BrowserWindow
 ```
 
 ## Development
 
 ```bash
-npm run dev    # electron-vite HMR dev server
-npm run build  # production build
-npx tsc --noEmit  # type check
+npm run dev         # electron-vite HMR dev server
+npm run build       # production build
+npm run dist        # + electron-builder installer
+npm run icon:build  # regenerate icon assets from build/icon.svg
+npx tsc --noEmit    # type check
 ```
 
 ## API Keys Required
@@ -125,9 +134,13 @@ Single Claude call does everything (`src/main/services/claude.ts`):
 - Design competitor discovery (5-8 competitors based on geographic scope)
 - Full brand synthesis + element-level `directionSpecs` DSL (3 directions)
 
+`max_tokens: 28000`. Lower values (~20k) triggered `stop_reason: 'max_tokens'` truncation on brand-heavy runs; higher values inflate the Anthropic pre-flight cost reserve (see "Credit balance too low" troubleshooting).
+
 `maxRetries: 0` on Anthropic client — our own `withRetry()` handles 429s by reading `retry-after` header.
 
 **JSON parse resilience**: long DSL outputs occasionally contain unescaped quotes or newlines in string values. `parseResult` tries strict `JSON.parse` first, then falls back to `jsonrepair`. On strict failure it logs ±120 chars around the error position via `dumpParseContext` to aid debugging. Do not silently swallow the fallback — if jsonrepair also fails, throw with full context.
+
+**Output language**: `context.language` (et|en, resolved from `outputLanguage` setting in `synthesis.ipc.ts`) is injected as the first user-message part with instructions to write all free-form prose in that language — brandVoice, concepts, rationales, moodboardKeywords, on-sketch copy, SEO/WCAG narrative. JSON keys/enum values stay English. The same `language` flows through to `report-builder.ts`, `prompt-builder.ts`, and `figma-script.ts`, which read labels from `outputStrings(lang)` in `src/shared/i18n.ts`. To add a new user-facing label anywhere in report/moodboard/Figma output, add a field to the `OutputStrings` interface + both tables first.
 
 ## Image Fetching
 
@@ -192,6 +205,7 @@ See `src/shared/types.ts` for:
 - `SeoWcagResult`
 - `SavedProject`, `SavedProjectData`
 - `StepId`, `StepStatus`, `OutputMode`, `CompetitorScope`
+- `OutputLanguage` (`'et' | 'en'`), part of `AppSettings`, `SynthesisContext`, `ReportData`, `MoodboardData`
 
 ## Electron IPC Channels
 
@@ -236,13 +250,21 @@ Without this cleanup, an orphan from a prior crash holds port 9223, the new daem
 
 **How to confirm the pipeline works before running full synthesis**: the debug probe button in Settings (`probeFigmaImages` IPC) writes a 32×32 red PNG, creates a rect via `figma_execute`, then applies the fill via `figma_set_image_fill`. If the rect renders solid red (not grey), the handoff is working end-to-end.
 
+### Figma moodboard rectangles grey when there are many images
+
+**Symptom**: The first image or two render correctly, then every remaining rectangle is grey. Logs show successive `figma_set_image_fill` MCP calls timing out.
+
+**Root cause**: The Bridge plugin processes fills serially inside Figma's plugin runtime. Under load each `figma_set_image_fill` call can take ~60 s to return. Our previous 30 s timeout on the MCP `callTool` caused every call after the first (which ran while the queue was still small) to abort with a silent timeout, leaving the placeholder grey fill in place.
+
+**Fix**: The timeout is set to 120 s in `mcp-figma.ts` for `figma_set_image_fill` specifically. Don't lower it without re-testing on a 20+ image moodboard. The comment at that call site carries the rationale — preserve it.
+
 ### "Credit balance too low" despite funded balance
 
 **Symptom**: Synthesis call fails with Anthropic 400 `{"type":"invalid_request_error","message":"Your credit balance is too low..."}` even though platform.claude.com shows a positive balance and spend limits have headroom.
 
 **Root cause, usually one of**:
 1. **API key belongs to a different organization than the one you funded.** Anthropic keys are org-scoped; credit grants are org-scoped. A key from org A cannot spend credits sitting in org B, even if the same user owns both. platform.claude.com → API keys lists the org for each key. Generate a new key inside the funded org and paste into Settings.
-2. **Pre-flight cost reserve exceeds balance.** Anthropic reserves `input_cost + max_tokens × output_price` before streaming. With `max_tokens: 32000` on Sonnet 4.6 and a rich input (system + scrape + competitors → ~30K tokens), the reserve can approach $5 and reject a call against a small top-up. We cap `max_tokens` at 20000 in `claude.ts` to keep this reserve under $1. Don't raise it without comfortable balance headroom.
+2. **Pre-flight cost reserve exceeds balance.** Anthropic reserves `input_cost + max_tokens × output_price` before streaming. With `max_tokens: 32000` on Sonnet 4.6 and a rich input (system + scrape + competitors → ~30K tokens), the reserve can approach $5 and reject a call against a small top-up. We cap `max_tokens` at 28000 in `claude.ts` — going lower (~20k) triggered `stop_reason: 'max_tokens'` truncation on brand-heavy runs. Don't raise above 28000 without comfortable balance headroom, and don't drop back below ~24k without re-verifying truncation behaviour on a full run.
 3. **Propagation lag**: fresh top-ups can take 5–15 min to become visible to the API. If (1) and (2) check out, wait and retry.
 
 **Diagnostic**: `synthesis.ipc.ts` logs `[synthesize] apiKey present: true (sk-ant-api03-XXXXXX...)`. Match the 16-char prefix against the API keys list at platform.claude.com to see which org the key actually belongs to.
