@@ -26,14 +26,58 @@ npm install
 npm run dev        # hot-reload Electron + Vite
 ```
 
-Production build:
+### Build scripts
+
+| Script | What it does | Output |
+|---|---|---|
+| `npm run dev` | electron-vite with HMR. Main + preload + renderer all hot-reload | dev server, no artifacts |
+| `npm run build` | Bundle for production (esbuild + vite). No installer | `out/` |
+| `npm run start` | Preview the production bundle in Electron (no installer) | runs `out/` |
+| `npm run dist` | `build` + electron-builder for the **current OS** | `dist/` |
+| `npm run icon:build` | Rasterise `build/icon.svg` → `build/icon.iconset/` + `icon.icns` + `icon.png` | `build/` |
+| `npx tsc --noEmit` | Standalone type check (no emit) | — |
+
+### Packaging a desktop app
+
+All installers land in `dist/` (configured via `build.directories.output` in `package.json`). electron-builder reads `build.mac.icon` / `build.win.icon` / `build.linux.icon` — make sure `npm run icon:build` has been run at least once so those files exist.
+
+**macOS** — run on macOS:
 
 ```bash
-npm run build      # type-check + bundle
-npm run dist       # + electron-builder installer
-npm run icon:build # regenerate app icon from build/icon.svg
-npx tsc --noEmit   # standalone type check
+npm run dist -- --mac            # both DMG and ZIP (default targets)
+npm run dist -- --mac dmg        # DMG only
+npm run dist -- --mac --arm64    # Apple Silicon only
+npm run dist -- --mac --x64      # Intel only
+npm run dist -- --mac --universal  # fat binary for both archs
 ```
+
+Output: `dist/Stiilileidja-0.1.0.dmg` + `dist/Stiilileidja-0.1.0-mac.zip` (arch suffixes added when cross-arch). Code signing / notarisation is **not configured** — the first open on another Mac will require right-click → Open to bypass Gatekeeper. To sign, add `CSC_LINK` + `CSC_KEY_PASSWORD` env vars and `build.mac.notarize` config; see electron-builder docs.
+
+**Windows `.exe` installer** — easiest on Windows:
+
+```bash
+npm run dist -- --win            # NSIS installer (default): Stiilileidja Setup 0.1.0.exe
+npm run dist -- --win portable   # single-file portable .exe, no install
+npm run dist -- --win nsis portable  # both
+```
+
+Cross-building Windows from macOS works if [Wine](https://wiki.winehq.org/MacOS) is installed (`brew install --cask wine-stable`). electron-builder auto-detects it. For code signing on Windows add `build.win.certificateFile` + `CSC_KEY_PASSWORD`.
+
+**Linux**:
+
+```bash
+npm run dist -- --linux          # AppImage (default)
+npm run dist -- --linux deb      # .deb package
+npm run dist -- --linux appimage deb rpm  # all three
+```
+
+**Multi-target in one run** (current host OS + cross-compile where supported):
+
+```bash
+npm run dist -- --mac --win      # macOS DMG/ZIP + Windows NSIS (needs Wine for win from macOS)
+```
+
+> After packaging, `build/icon.icns`, `build/icon.png`, and `out/**/*` are included in the app bundle per the `build.files` array. Don't add anything else to `files` without verifying — electron-builder will otherwise ship the whole repo inside the `.asar`.
 
 ## Required setup
 
