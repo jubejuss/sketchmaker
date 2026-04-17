@@ -18,6 +18,13 @@ build/
 release/
 app/
 
+# electron-builder reads app icons from build/ — keep those tracked
+!build/
+build/icon.iconset/
+!build/icon.svg
+!build/icon.png
+!build/icon.icns
+
 # electron-builder installers / signed artifacts (in case built outside dist/)
 *.dmg
 *.dmg.blockmap

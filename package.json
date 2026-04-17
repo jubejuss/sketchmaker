@@ -9,7 +9,8 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "dist": "npm run build && electron-builder",
-    "probe:images": "npx -y tsx scripts/probe-figma-images.ts"
+    "probe:images": "npx -y tsx scripts/probe-figma-images.ts",
+    "icon:build": "npx -y tsx scripts/generate-icon.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -39,10 +40,19 @@
     "appId": "ee.vilenkell.stiilileidja",
     "productName": "Stiilileidja",
     "mac": {
-      "category": "public.app-category.graphics-design"
+      "category": "public.app-category.graphics-design",
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "icon": "build/icon.png"
     },
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "build/icon.icns",
+      "build/icon.png"
     ],
     "directories": {
       "output": "dist"

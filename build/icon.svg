@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Stiilileidja app icon: three offset moodboard cards in editorial palette -->
+  <defs>
+    <clipPath id="squircle">
+      <!-- iOS/macOS Big Sur–style squircle mask -->
+      <path d="M 512 0
+               C 776 0 924 0 994 70
+               C 1064 140 1024 288 1024 512
+               C 1024 736 1064 884 994 954
+               C 924 1024 776 1024 512 1024
+               C 248 1024 100 1024 30 954
+               C -40 884 0 736 0 512
+               C 0 288 -40 140 30 70
+               C 100 0 248 0 512 0 Z"/>
+    </clipPath>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="12" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.12"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <!-- Cream editorial background -->
+    <rect width="1024" height="1024" fill="#F4F1EA"/>
+
+    <!-- Subtle grain wash -->
+    <rect width="1024" height="1024" fill="url(#none)" opacity="0.04"/>
+
+    <!-- Three moodboard cards, slightly offset like a fanned stack -->
+    <g filter="url(#shadow)">
+      <!-- Back card: warm terracotta -->
+      <rect x="240" y="260" width="560" height="560" rx="56" ry="56"
+            fill="#C65D3F" transform="rotate(-7 512 512)"/>
+      <!-- Middle card: deep ink -->
+      <rect x="232" y="232" width="560" height="560" rx="56" ry="56"
+            fill="#1A1A2E" transform="rotate(2 512 512)"/>
+      <!-- Front card: sage with a small palette motif -->
+      <rect x="224" y="224" width="560" height="560" rx="56" ry="56"
+            fill="#7A8B6E"/>
+    </g>
+
+    <!-- Palette dots on front card -->
+    <g transform="translate(312 620)">
+      <circle cx="0"   cy="0" r="46" fill="#F4F1EA"/>
+      <circle cx="120" cy="0" r="46" fill="#1A1A2E"/>
+      <circle cx="240" cy="0" r="46" fill="#C65D3F"/>
+      <circle cx="360" cy="0" r="46" fill="#E8B96B"/>
+    </g>
+
+    <!-- Minimal S/serif mark at top-left of front card -->
+    <text x="300" y="400"
+          font-family="Playfair Display, Didot, Bodoni 72, Georgia, serif"
+          font-size="280"
+          font-weight="400"
+          fill="#F4F1EA"
+          letter-spacing="-8">S</text>
+  </g>
+</svg>
