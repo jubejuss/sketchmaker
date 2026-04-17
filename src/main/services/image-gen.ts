@@ -123,25 +123,10 @@ async function downloadToTempFile(url: string, keySeed: string): Promise<string 
 }
 
 async function fetchOpenAI(apiKey: string, ref: ImagePromptRef): Promise<string | null> {
-  const res = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'gpt-image-1',
-      prompt: ref.prompt.slice(0, 4000),
-      size: ref.size,
-      quality: 'medium',
-      n: 1
-    })
-  })
-
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`OpenAI image ${res.status}: ${body.slice(0, 200)}`)
-  }
+  // gpt-image-1 at quality=medium is rate-limited (tier-1 orgs get ~3 images/min).
+  // With concurrency 3 and 10-15 total images per run we routinely hit 429 on the
+  // later requests, so retry transient failures instead of dropping the image.
+  const res = await openAIImageRequestWithRetry(apiKey, ref)
 
   const json = await res.json() as { data?: Array<{ b64_json?: string; url?: string }> }
   const item = json.data?.[0]
@@ -154,6 +139,45 @@ async function fetchOpenAI(apiKey: string, ref: ImagePromptRef): Promise<string 
   }
   if (item.url) return downloadToTempFile(item.url, ref.prompt)
   throw new Error('OpenAI response missing image')
+}
+
+async function openAIImageRequestWithRetry(apiKey: string, ref: ImagePromptRef): Promise<Response> {
+  const MAX_ATTEMPTS = 5
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-image-1',
+        prompt: ref.prompt.slice(0, 4000),
+        size: ref.size,
+        quality: 'medium',
+        n: 1
+      }),
+      signal: AbortSignal.timeout(180_000)
+    })
+
+    if (res.ok) return res
+
+    const transient = res.status === 429 || res.status >= 500
+    if (!transient || attempt === MAX_ATTEMPTS) {
+      const body = await res.text()
+      throw new Error(`OpenAI image ${res.status}: ${body.slice(0, 200)}`)
+    }
+
+    // Respect server's Retry-After when present, else exponential backoff (2s, 4s, 8s, 16s…)
+    const retryAfterHeader = res.headers.get('retry-after')
+    const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : NaN
+    const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+      ? retryAfterSec * 1000
+      : Math.min(2000 * 2 ** (attempt - 1), 30_000)
+    console.warn(`[image-gen:openai] ${res.status} on attempt ${attempt}/${MAX_ATTEMPTS}, waiting ${waitMs}ms`)
+    await new Promise(r => setTimeout(r, waitMs))
+  }
+  throw new Error('OpenAI image: unreachable (retry loop exited without return)')
 }
 
 function walkElements(elements: VisualElement[] | undefined, visit: (el: VisualElement) => void): void {
