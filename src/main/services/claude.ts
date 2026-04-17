@@ -133,7 +133,7 @@ export async function synthesize(
   const userContent = buildUserContent(context)
   const params = {
     model: 'claude-sonnet-4-6' as const,
-    max_tokens: 32000,
+    max_tokens: 20000,
     system: [
       {
         type: 'text' as const,
