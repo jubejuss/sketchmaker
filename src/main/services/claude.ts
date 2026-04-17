@@ -133,7 +133,7 @@ export async function synthesize(
   const userContent = buildUserContent(context)
   const params = {
     model: 'claude-sonnet-4-6' as const,
-    max_tokens: 20000,
+    max_tokens: 28000,
     system: [
       {
         type: 'text' as const,
@@ -153,6 +153,10 @@ export async function synthesize(
         accumulated += text
         onToken(text)
       }
+    }
+    const final = await stream.finalMessage()
+    if (final.stop_reason === 'max_tokens') {
+      console.warn(`[synthesize] response hit max_tokens — output truncated at ${final.usage?.output_tokens} tokens. parseResult will attempt repair.`)
     }
     return parseResult(accumulated)
   }, 'synthesize', 3, { onWait })
@@ -324,26 +328,40 @@ Respond with a single JSON object wrapped in <json></json> tags:
 }
 
 function parseResult(text: string): SynthesisResult {
-  const match = text.match(/<json>([\s\S]*?)<\/json>/)
-  if (!match) {
-    throw new Error('Claude did not return valid JSON in <json> tags')
+  // Prefer a fully-closed <json>...</json> block. If the response was truncated
+  // by max_tokens, the closing tag may be missing — fall back to everything
+  // after the opening <json> and let jsonrepair patch the unclosed structure.
+  const closed = text.match(/<json>([\s\S]*?)<\/json>/)
+  let raw: string
+  let truncated = false
+  if (closed) {
+    raw = closed[1].trim()
+  } else {
+    const openIdx = text.indexOf('<json>')
+    if (openIdx === -1) {
+      throw new Error('Claude did not return valid JSON in <json> tags')
+    }
+    raw = text.slice(openIdx + '<json>'.length).trim()
+    truncated = true
+    console.warn('[synthesize] <json> opened but </json> missing — treating as truncated, forcing jsonrepair path')
   }
 
-  const raw = match[1].trim()
+  if (!truncated) {
+    try {
+      return JSON.parse(raw) as SynthesisResult
+    } catch (strictErr) {
+      console.warn('[synthesize] strict JSON.parse failed, attempting jsonrepair:', (strictErr as Error).message)
+      dumpParseContext(raw, strictErr as Error)
+    }
+  }
 
   try {
-    return JSON.parse(raw) as SynthesisResult
-  } catch (strictErr) {
-    console.warn('[synthesize] strict JSON.parse failed, attempting jsonrepair:', (strictErr as Error).message)
-    dumpParseContext(raw, strictErr as Error)
-    try {
-      const repaired = jsonrepair(raw)
-      const result = JSON.parse(repaired) as SynthesisResult
-      console.log('[synthesize] jsonrepair succeeded — parse recovered')
-      return result
-    } catch (repairErr) {
-      throw new Error(`Failed to parse synthesis JSON (even after repair): ${repairErr}`)
-    }
+    const repaired = jsonrepair(raw)
+    const result = JSON.parse(repaired) as SynthesisResult
+    console.log(`[synthesize] jsonrepair succeeded${truncated ? ' (recovered from truncated response)' : ''}`)
+    return result
+  } catch (repairErr) {
+    throw new Error(`Failed to parse synthesis JSON (even after repair): ${repairErr}`)
   }
 }
 
