@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
-import type { ImageSource, ResearchMode } from '../../shared/types.js'
+import type { ImageSource, OutputLanguage, ResearchMode } from '../../shared/types.js'
 
 interface Settings {
   researchMode: ResearchMode
   imageSource: ImageSource
+  outputLanguage: OutputLanguage
   anthropicApiKey: string
   ahrefsApiKey: string
   figmaAccessToken: string
@@ -16,6 +17,7 @@ export default function SettingsView(): React.ReactElement {
   const [settings, setSettings] = useState<Settings>({
     researchMode: 'ahrefs',
     imageSource: 'pexels',
+    outputLanguage: 'et',
     anthropicApiKey: '',
     ahrefsApiKey: '',
     figmaAccessToken: '',
@@ -41,6 +43,7 @@ export default function SettingsView(): React.ReactElement {
       setSettings({
         researchMode: raw.researchMode || 'ahrefs',
         imageSource: raw.imageSource || 'pexels',
+        outputLanguage: raw.outputLanguage || 'et',
         anthropicApiKey: s.anthropicApiKey || '',
         ahrefsApiKey: s.ahrefsApiKey || '',
         figmaAccessToken: s.figmaAccessToken || '',
@@ -256,6 +259,52 @@ export default function SettingsView(): React.ReactElement {
                 <div style={{
                   fontFamily: 'var(--display)', fontSize: 12, fontWeight: 600,
                   color: settings.imageSource === opt.id ? 'var(--accent)' : 'var(--text-primary)',
+                  marginBottom: 3
+                }}>
+                  {opt.label}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--text-muted)' }}>
+                  {opt.sub}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{
+            fontFamily: 'var(--display)', fontSize: 13, fontWeight: 600,
+            color: 'var(--text-primary)', marginBottom: 4
+          }}>
+            Väljundi keel
+          </div>
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--text-muted)', marginBottom: 12
+          }}>
+            Mõjutab raporti PDF-i, moodboardi silte ja Claude&apos;i genereeritud teksti. UI jääb alati eesti keelde.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {([
+              { id: 'et', label: 'Eesti', sub: 'Vaikimisi' },
+              { id: 'en', label: 'English', sub: 'Export · klient välismaal' }
+            ] as { id: OutputLanguage; label: string; sub: string }[]).map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setSettings(s => ({ ...s, outputLanguage: opt.id }))}
+                style={{
+                  padding: '12px 10px',
+                  background: settings.outputLanguage === opt.id ? 'var(--accent-dim)' : 'var(--bg-card)',
+                  border: `1px solid ${settings.outputLanguage === opt.id ? 'var(--accent)' : 'var(--border)'}`,
+                  borderRadius: 8,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div style={{
+                  fontFamily: 'var(--display)', fontSize: 12, fontWeight: 600,
+                  color: settings.outputLanguage === opt.id ? 'var(--accent)' : 'var(--text-primary)',
                   marginBottom: 3
                 }}>
                   {opt.label}

@@ -1,16 +1,18 @@
 import type { ReportData } from '../../shared/types.js'
+import { outputStrings } from '../../shared/i18n.js'
 
 export function buildReportHtml(data: ReportData): string {
   const { brief, scrapedSite, competitors, synthesis, seoWcag } = data
-  const date = new Date().toLocaleDateString('et-EE', { year: 'numeric', month: 'long', day: 'numeric' })
-  const projectName = scrapedSite?.title || 'Projekt'
+  const t = outputStrings(data.language)
+  const date = new Date().toLocaleDateString(t.dateLocale, { year: 'numeric', month: 'long', day: 'numeric' })
+  const projectName = scrapedSite?.title || t.reportProjectFallback
 
   return `<!DOCTYPE html>
-<html lang="et">
+<html lang="${t.htmlLangAttr}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stiilianalüüs — ${projectName}</title>
+  <title>${t.reportCoverLabel} — ${escapeHtml(projectName)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
   <style>
@@ -146,7 +148,7 @@ export function buildReportHtml(data: ReportData): string {
 
 <!-- COVER -->
 <div class="cover">
-  <div class="cover-label">Stiilileidja · Brändianalüüs</div>
+  <div class="cover-label">${t.reportCoverLabel}</div>
   <div class="cover-title">${escapeHtml(projectName)}</div>
   ${scrapedSite ? `<div style="opacity:0.6;font-size:14px;margin-top:8px">${escapeHtml(scrapedSite.url)}</div>` : ''}
   <div style="opacity:0.6;font-size:14px;margin-top:24px;max-width:600px;line-height:1.6">${escapeHtml(synthesis.brandVoice)}</div>
@@ -164,16 +166,16 @@ export function buildReportHtml(data: ReportData): string {
   <!-- SECTION 1: Brief -->
   <div class="section">
     <div class="section-label">01</div>
-    <div class="section-title">Lähteülesanne</div>
-    <div class="brief-box">${escapeHtml(brief || 'Lähteülesanne puudub.')}</div>
+    <div class="section-title">${t.sectionBrief}</div>
+    <div class="brief-box">${escapeHtml(brief || t.briefFallback)}</div>
 
     <div style="margin-top:32px">
-      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666;margin-bottom:12px">Sihtgrupp</div>
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666;margin-bottom:12px">${t.targetAudienceLabel}</div>
       <div style="font-size:15px">${escapeHtml(synthesis.targetAudience)}</div>
     </div>
 
     <div style="margin-top:24px">
-      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666;margin-bottom:12px">Brändi iseloom</div>
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666;margin-bottom:12px">${t.brandPersonalityLabel}</div>
       <div class="tags">
         ${synthesis.brandPersonality.map((p, i) => `<span class="tag ${i === 0 ? 'tag-primary' : ''}">${escapeHtml(p)}</span>`).join('')}
       </div>
@@ -184,16 +186,16 @@ export function buildReportHtml(data: ReportData): string {
   <!-- SECTION 2: Website Analysis -->
   <div class="section">
     <div class="section-label">02</div>
-    <div class="section-title">Veebisaidi analüüs</div>
+    <div class="section-title">${t.sectionWebsite}</div>
 
     <div class="screenshots">
       <div class="screenshot-card">
-        <img src="data:image/png;base64,${scrapedSite.screenshots.aboveFold}" alt="Veebisait — esimene vaade">
-        <div class="screenshot-label">Esimene vaade (1440×900)</div>
+        <img src="data:image/png;base64,${scrapedSite.screenshots.aboveFold}" alt="${t.websiteFirstViewAlt}">
+        <div class="screenshot-label">${t.websiteFirstViewCaption}</div>
       </div>
       <div>
         <div style="font-size:13px;color:#666;line-height:1.7;margin-bottom:16px">${escapeHtml(scrapedSite.description || '—')}</div>
-        <div style="font-size:12px;color:#999">Hetkel kasutusel olevad fondid:</div>
+        <div style="font-size:12px;color:#999">${t.websiteFontsLabel}</div>
         ${scrapedSite.fonts.map((f) => `
           <div style="margin-top:8px;padding:8px 12px;background:#f5f5f5;border-radius:6px">
             <div style="font-weight:600;font-size:13px">${escapeHtml(f.family)}</div>
@@ -203,7 +205,7 @@ export function buildReportHtml(data: ReportData): string {
       </div>
     </div>
 
-    <div style="margin-bottom:16px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">Praegune värvipalett (ekraanipildi analüüs)</div>
+    <div style="margin-bottom:16px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">${t.websiteCurrentPaletteLabel}</div>
     <div class="palette">
       ${scrapedSite.colors.slice(0, 6).map((c) => `
         <div class="swatch">
@@ -220,15 +222,15 @@ export function buildReportHtml(data: ReportData): string {
   ${competitors.length > 1 ? `
   <div class="section">
     <div class="section-label">${scrapedSite ? '03' : '02'}</div>
-    <div class="section-title">Konkurentsiolukord</div>
+    <div class="section-title">${t.sectionCompetitors}</div>
 
     <table>
       <thead>
         <tr>
-          <th>Domeen</th>
-          <th>DR</th>
-          <th>Orgaaniline liiklus/kuu</th>
-          <th>Tüüp</th>
+          <th>${t.competitorsDomainHeader}</th>
+          <th>${t.competitorsDrHeader}</th>
+          <th>${t.competitorsTrafficHeader}</th>
+          <th>${t.competitorsTypeHeader}</th>
         </tr>
       </thead>
       <tbody>
@@ -236,8 +238,8 @@ export function buildReportHtml(data: ReportData): string {
           <tr class="${c.isLocal ? 'client-row' : ''}">
             <td>${escapeHtml(c.domain)}</td>
             <td><span class="dr-badge">${c.domainRating ?? '—'}</span></td>
-            <td>${c.organicTraffic != null ? c.organicTraffic.toLocaleString('et-EE') : '—'}</td>
-            <td style="font-size:11px;color:#999">${c.isLocal ? 'Klient' : 'Konkurent'}</td>
+            <td>${c.organicTraffic != null ? c.organicTraffic.toLocaleString(t.numberLocale) : '—'}</td>
+            <td style="font-size:11px;color:#999">${c.isLocal ? t.competitorsClientLabel : t.competitorsCompetitorLabel}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -245,7 +247,7 @@ export function buildReportHtml(data: ReportData): string {
 
     ${synthesis.competitorGaps.length > 0 ? `
     <div style="margin-top:32px">
-      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666;margin-bottom:16px">Võimalused turul</div>
+      <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666;margin-bottom:16px">${t.competitorsGapsLabel}</div>
       <ul style="list-style:none;display:flex;flex-direction:column;gap:10px">
         ${synthesis.competitorGaps.map((gap) => `
           <li style="display:flex;gap:10px;align-items:flex-start">
@@ -262,17 +264,17 @@ export function buildReportHtml(data: ReportData): string {
   <!-- SECTION 4: Brand Strategy -->
   <div class="section">
     <div class="section-label">${scrapedSite ? (competitors.length > 1 ? '04' : '03') : (competitors.length > 1 ? '03' : '02')}</div>
-    <div class="section-title">Visuaalne strateegia</div>
+    <div class="section-title">${t.sectionStrategy}</div>
 
     <div style="font-size:15px;line-height:1.8;max-width:720px;margin-bottom:40px">${escapeHtml(synthesis.visualDirection)}</div>
 
-    <div style="margin-bottom:16px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">Soovituslik värvipalett</div>
+    <div style="margin-bottom:16px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">${t.strategyPaletteLabel}</div>
     <div class="strategy-palette">
       ${[
-        { role: 'Põhivärv', hex: synthesis.colorStrategy.primary },
-        { role: 'Aktsent', hex: synthesis.colorStrategy.accent },
-        { role: 'Neutraalne', hex: synthesis.colorStrategy.neutral },
-        { role: 'Taust', hex: synthesis.colorStrategy.background }
+        { role: t.strategyColorPrimary, hex: synthesis.colorStrategy.primary },
+        { role: t.strategyColorAccent, hex: synthesis.colorStrategy.accent },
+        { role: t.strategyColorNeutral, hex: synthesis.colorStrategy.neutral },
+        { role: t.strategyColorBackground, hex: synthesis.colorStrategy.background }
       ].map((s) => `
         <div class="strategy-swatch">
           <div class="strategy-swatch-color" style="background:${s.hex}"></div>
@@ -285,17 +287,17 @@ export function buildReportHtml(data: ReportData): string {
     </div>
     <div style="font-size:12px;color:#666;line-height:1.6;max-width:600px;margin-bottom:40px">${escapeHtml(synthesis.colorStrategy.rationale)}</div>
 
-    <div style="margin-bottom:16px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">Tüpograafia</div>
+    <div style="margin-bottom:16px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">${t.strategyTypographyLabel}</div>
     <div class="font-specimens" style="margin-bottom:40px">
       <div class="font-specimen">
-        <div class="font-specimen-label">Pealkirjafont</div>
+        <div class="font-specimen-label">${t.strategyHeadingFontLabel}</div>
         <div class="font-specimen-name">${escapeHtml(synthesis.suggestedFonts.heading)}</div>
         <div class="font-specimen-sample" style="font-family:'${escapeHtml(synthesis.suggestedFonts.heading)}',serif">
           Aa Bb Cc
         </div>
       </div>
       <div class="font-specimen">
-        <div class="font-specimen-label">Tekstifont</div>
+        <div class="font-specimen-label">${t.strategyBodyFontLabel}</div>
         <div class="font-specimen-name">${escapeHtml(synthesis.suggestedFonts.body)}</div>
         <div class="font-specimen-sample" style="font-family:'${escapeHtml(synthesis.suggestedFonts.body)}',sans-serif">
           Aa Bb Cc
@@ -308,13 +310,13 @@ export function buildReportHtml(data: ReportData): string {
   <!-- SECTION 5: Moodboard Direction -->
   <div class="section">
     <div class="section-label">Moodboard</div>
-    <div class="section-title">Stiilimärgid</div>
+    <div class="section-title">${t.moodboardKeywordsTitle}</div>
 
     <div class="keywords-grid" style="margin-bottom:40px">
       ${synthesis.moodboardKeywords.map((kw) => `<div class="keyword-card">${escapeHtml(kw)}</div>`).join('')}
     </div>
 
-    <div style="margin-bottom:24px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">Disainisoovitused</div>
+    <div style="margin-bottom:24px;font-size:12px;text-transform:uppercase;letter-spacing:0.1em;color:#666">${t.moodboardRecommendationsLabel}</div>
     <div class="recommendations">
       ${synthesis.styleRecommendations.map((rec) => `
         <div class="rec-card">
@@ -330,18 +332,18 @@ export function buildReportHtml(data: ReportData): string {
   <!-- SECTION 6: SEO & WCAG -->
   <div class="section">
     <div class="section-label">SEO &amp; WCAG</div>
-    <div class="section-title">Otsimootorite optimeerimine ja ligipääsetavus</div>
+    <div class="section-title">${t.sectionSeoWcag}</div>
 
     <div class="score-grid">
       <div class="score-box">
-        <div class="score-label">SEO skoor</div>
+        <div class="score-label">${t.seoScoreLabel}</div>
         <div class="score-value" style="color:${seoWcag.seo.score >= 80 ? '#16a34a' : seoWcag.seo.score >= 50 ? '#d97706' : '#dc2626'}">${seoWcag.seo.score}</div>
         <div class="score-sub">/ 100</div>
       </div>
       <div class="score-box">
-        <div class="score-label">WCAG skoor</div>
+        <div class="score-label">${t.wcagScoreLabel}</div>
         <div class="score-value" style="color:${seoWcag.wcag.score >= 80 ? '#16a34a' : seoWcag.wcag.score >= 50 ? '#d97706' : '#dc2626'}">${seoWcag.wcag.score}</div>
-        <div class="score-sub">/ 100 · Tase ${escapeHtml(seoWcag.wcag.level)}</div>
+        <div class="score-sub">/ 100 · ${t.wcagLevelLabel} ${escapeHtml(seoWcag.wcag.level)}</div>
       </div>
     </div>
 
@@ -349,7 +351,7 @@ export function buildReportHtml(data: ReportData): string {
 
     ${seoWcag.seo.technicalIssues.length > 0 ? `
     <div style="margin-bottom:24px">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">SEO tehnilised probleemid</div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">${t.seoTechnicalIssuesLabel}</div>
       <ul class="issue-list">
         ${seoWcag.seo.technicalIssues.map((issue) => `
           <li class="issue-item">
@@ -362,7 +364,7 @@ export function buildReportHtml(data: ReportData): string {
 
     ${seoWcag.seo.opportunities.length > 0 ? `
     <div style="margin-bottom:24px">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">SEO võimalused</div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">${t.seoOpportunitiesLabel}</div>
       <ul class="issue-list">
         ${seoWcag.seo.opportunities.map((opp) => `
           <li class="issue-item">
@@ -375,7 +377,7 @@ export function buildReportHtml(data: ReportData): string {
 
     ${seoWcag.wcag.issues.length > 0 ? `
     <div style="margin-bottom:24px">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">WCAG probleemid</div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">${t.wcagIssuesLabel}</div>
       ${seoWcag.wcag.issues.map((issue) => `
         <div class="wcag-issue ${issue.severity}">
           <span class="wcag-badge ${issue.severity}">${issue.severity}</span>
@@ -387,7 +389,7 @@ export function buildReportHtml(data: ReportData): string {
 
     ${seoWcag.seo.keywords.length > 0 ? `
     <div>
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">Märksõnad</div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.15em;color:#666;margin-bottom:10px">${t.seoKeywordsLabel}</div>
       <div class="keyword-pills">
         ${seoWcag.seo.keywords.map((kw) => `<span class="keyword-pill">${escapeHtml(kw)}</span>`).join('')}
       </div>

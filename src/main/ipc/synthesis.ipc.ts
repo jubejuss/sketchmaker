@@ -11,17 +11,18 @@ export function registerSynthesisIpc(mainWindow: BrowserWindow): void {
     const imageSource = store.get('imageSource') || 'pexels'
     const openaiKey = store.get('openaiApiKey') || ''
     const pexelsKey = store.get('pexelsApiKey') || ''
+    const language = context.language ?? store.get('outputLanguage') ?? 'et'
 
     console.log('[synthesize] authMode:', authMode)
     console.log('[synthesize] apiKey present:', !!apiKey, apiKey ? `(${apiKey.slice(0, 16)}...)` : '(empty)')
-    console.log('[synthesize] brief length:', context.brief?.length ?? 0, 'competitors:', context.competitors?.length ?? 0)
+    console.log('[synthesize] brief length:', context.brief?.length ?? 0, 'competitors:', context.competitors?.length ?? 0, 'language:', language)
 
     if (!apiKey) throw new Error('API võti puudub. Kontrolli seadeid.')
 
     try {
       const result = await synthesize(
         apiKey,
-        context,
+        { ...context, language },
         (token: string) => { mainWindow.webContents.send('synthesis:token', token) },
         (attempt: number, waitSec: number) => {
           console.warn(`[synthesize] waiting ${waitSec}s (attempt ${attempt})`)

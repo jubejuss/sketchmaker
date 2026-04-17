@@ -6,6 +6,7 @@ const store = new Store<AppSettings>({
     authMode: 'api-key',
     researchMode: 'ahrefs',
     imageSource: 'pexels',
+    outputLanguage: 'et',
     anthropicApiKey: '',
     ahrefsApiKey: '',
     figmaAccessToken: '',

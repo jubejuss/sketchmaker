@@ -1,4 +1,5 @@
 import type { MoodboardData, OutputMode } from '../../shared/types.js'
+import { outputStrings } from '../../shared/i18n.js'
 
 export interface GeneratedPrompt {
   mode: OutputMode
@@ -229,7 +230,8 @@ keywords.forEach((kw, i) => {
 
 export function buildMoodboardHtml(data: MoodboardData): string {
   const { synthesis, projectName } = data
-  const { colorStrategy, suggestedFonts, moodboardKeywords, brandPersonality, styleRecommendations } = synthesis
+  const { colorStrategy, suggestedFonts, moodboardKeywords, brandPersonality } = synthesis
+  const t = outputStrings(data.language)
 
   return `<div style="
   width: 1440px;
@@ -251,7 +253,7 @@ export function buildMoodboardHtml(data: MoodboardData): string {
   ">
     <div>
       <div style="font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: ${colorStrategy.accent}; margin-bottom: 24px;">
-        Stylescape
+        ${t.moodboardStylescapeLabel}
       </div>
       <div style="
         font-family: '${suggestedFonts.heading}', serif;
@@ -266,7 +268,7 @@ export function buildMoodboardHtml(data: MoodboardData): string {
     </div>
     <div>
       <div style="font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase; color: ${colorStrategy.neutral}; opacity: 0.6; margin-bottom: 16px;">
-        Brand Palette
+        ${t.moodboardBrandPaletteLabel}
       </div>
       <div style="display: flex; gap: 12px;">
         ${[colorStrategy.primary, colorStrategy.accent, colorStrategy.neutral, colorStrategy.background].map((hex) =>
@@ -281,7 +283,7 @@ export function buildMoodboardHtml(data: MoodboardData): string {
     <!-- Keywords -->
     <div>
       <div style="font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: ${colorStrategy.neutral}; margin-bottom: 16px;">
-        Mood Keywords
+        ${t.moodboardMoodKeywordsLabel}
       </div>
       <div style="display: flex; flex-wrap: wrap; gap: 10px;">
         ${moodboardKeywords.map((kw, i) => `
@@ -299,7 +301,7 @@ export function buildMoodboardHtml(data: MoodboardData): string {
 
     <!-- Typography specimen -->
     <div style="padding: 28px; background: ${colorStrategy.neutral}10; border-radius: 12px;">
-      <div style="font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: ${colorStrategy.neutral}; margin-bottom: 20px;">Typography</div>
+      <div style="font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: ${colorStrategy.neutral}; margin-bottom: 20px;">${t.moodboardTypographyLabel}</div>
       <div style="font-family: '${suggestedFonts.heading}', serif; font-size: 40px; line-height: 1.1; color: ${colorStrategy.primary}; margin-bottom: 12px;">
         ${escapeHtml(suggestedFonts.heading)}
       </div>
@@ -310,7 +312,7 @@ export function buildMoodboardHtml(data: MoodboardData): string {
 
     <!-- Personality -->
     <div>
-      <div style="font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: ${colorStrategy.neutral}; margin-bottom: 12px;">Brand Personality</div>
+      <div style="font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: ${colorStrategy.neutral}; margin-bottom: 12px;">${t.moodboardBrandPersonalityLabel}</div>
       <div style="display: flex; gap: 10px;">
         ${brandPersonality.slice(0, 3).map((p, i) => `
           <div style="

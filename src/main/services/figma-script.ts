@@ -1,4 +1,5 @@
 import type { MoodboardData, DirectionSpec, SectionSpec, VisualElement, PageSection } from '../../shared/types.js'
+import { outputStrings } from '../../shared/i18n.js'
 
 const DEFAULT_SECTIONS: PageSection[] = ['header', 'hero', 'events', 'news', 'footer']
 const SECTION_HEIGHT_FALLBACK: Record<string, number> = {
@@ -8,6 +9,7 @@ const SECTION_HEIGHT_FALLBACK: Record<string, number> = {
 
 export function buildFigmaScript(data: MoodboardData): string {
   const { synthesis, projectName } = data
+  const t = outputStrings(data.language)
   const specs = (synthesis.directionSpecs && synthesis.directionSpecs.length > 0)
     ? synthesis.directionSpecs.slice(0, 3)
     : buildFallbackSpecs(synthesis, data.sections ?? DEFAULT_SECTIONS)
@@ -15,6 +17,10 @@ export function buildFigmaScript(data: MoodboardData): string {
   const padded = padToThree(specs, synthesis, data.sections ?? DEFAULT_SECTIONS)
   const fontReqs = collectFontRequests(padded)
   const canvasName = esc(projectName || 'Moodboard')
+  const pageName = esc(t.figmaStyleSketchesPageName(projectName || 'Moodboard'))
+  const canvasFrameLabel = esc(t.figmaStyleSketchesLabel)
+  const canvasTitle = esc(t.figmaStyleSketchesCanvasTitle)
+  const directionLabel = esc(t.figmaDirectionLabel)
 
   const specsJson = JSON.stringify(padded)
   const fontReqsJson = JSON.stringify(fontReqs)
@@ -27,8 +33,8 @@ console.log('[stiilileidja] script start — directions:', ${padded.length}, 'im
 
 async function main() {
   await figma.loadAllPagesAsync();
-  let page = figma.root.children.find(p => p.name === "Style Sketches — ${canvasName}");
-  if (!page) { page = figma.createPage(); page.name = "Style Sketches — ${canvasName}"; }
+  let page = figma.root.children.find(p => p.name === "${pageName}");
+  if (!page) { page = figma.createPage(); page.name = "${pageName}"; }
   await figma.setCurrentPageAsync(page);
   for (const c of [...page.children]) c.remove();
 
@@ -223,7 +229,7 @@ async function main() {
   const CH = FH + 160;
 
   const canvas = figma.createFrame();
-  canvas.name = 'Style Sketches';
+  canvas.name = "${canvasFrameLabel}";
   canvas.resize(CW, CH);
   canvas.fills = [solidFill('#E8E5DF', 1)];
   page.appendChild(canvas);
@@ -232,7 +238,7 @@ async function main() {
   try {
     const title = figma.createText();
     title.fontName = titleFont;
-    title.characters = ('STYLE SKETCHES — ' + '${canvasName}').toUpperCase();
+    title.characters = ('${canvasTitle}' + '${canvasName}').toUpperCase();
     title.fontSize = 11;
     title.fills = [solidFill('#1A1A2E', 0.35)];
     title.x = M;
@@ -249,7 +255,7 @@ async function main() {
     column.y = 76;
     column.cornerRadius = 10;
     column.clipsContent = true;
-    column.name = direction.title || ('Direction ' + (di + 1));
+    column.name = direction.title || ('${directionLabel} ' + (di + 1));
     const bgColor = (direction.palette && direction.palette[direction.palette.length - 1]) || '#F4F1EA';
     column.fills = [solidFill(bgColor, 1)];
     canvas.appendChild(column);
@@ -274,7 +280,7 @@ async function main() {
     try {
       const lbl = figma.createText();
       lbl.fontName = titleFont;
-      lbl.characters = direction.title || ('Direction ' + (di + 1));
+      lbl.characters = direction.title || ('${directionLabel} ' + (di + 1));
       lbl.fontSize = 13;
       lbl.fills = [solidFill('#1A1A2E', 0.55)];
       lbl.x = fx;

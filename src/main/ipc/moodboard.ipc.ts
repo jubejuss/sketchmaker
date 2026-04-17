@@ -40,6 +40,9 @@ export function registerMoodboardIpc(mainWindow: BrowserWindow): void {
       mainWindow.webContents.send('moodboard:progress', msg)
     }
 
+    const language = data.language ?? store.get('outputLanguage') ?? 'et'
+    const enrichedData: MoodboardData = { ...data, language }
+
     if (mode === 'figma-execute') {
       const check = await checkFigmaAvailable()
       if (!check.ok) {
@@ -47,10 +50,10 @@ export function registerMoodboardIpc(mainWindow: BrowserWindow): void {
           success: false,
           fallback: 'figma-prompt',
           message: check.error ?? 'Figma ühendus ebaõnnestus.',
-          prompt: buildPrompt(data, 'figma-prompt')
+          prompt: buildPrompt(enrichedData, 'figma-prompt')
         }
       }
-      const screenshot = await executeFigmaMoodboard(data, sendProgress)
+      const screenshot = await executeFigmaMoodboard(enrichedData, sendProgress)
       return {
         success: true,
         screenshot,
@@ -65,15 +68,15 @@ export function registerMoodboardIpc(mainWindow: BrowserWindow): void {
           success: false,
           fallback: 'paper-prompt',
           message: check.error ?? 'Pencil/Paper ühendus ebaõnnestus.',
-          prompt: buildPrompt(data, 'paper-prompt')
+          prompt: buildPrompt(enrichedData, 'paper-prompt')
         }
       }
-      const screenshot = await executePaperMoodboard(data, sendProgress)
+      const screenshot = await executePaperMoodboard(enrichedData, sendProgress)
       return { success: true, screenshot }
     }
 
     // Prompt modes — save to file and return
-    const generatedPrompt = buildPrompt(data, mode)
+    const generatedPrompt = buildPrompt(enrichedData, mode)
     const outputDir = store.get('outputDir') || path.join(app.getPath('desktop'), 'stiilileidja-output')
     fs.mkdirSync(outputDir, { recursive: true })
 

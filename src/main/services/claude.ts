@@ -179,6 +179,15 @@ function buildSectionsExample(sections: string[]): string {
 function buildUserContent(context: SynthesisContext): string {
   const parts: string[] = []
 
+  const languageInstruction = context.language === 'en'
+    ? `## Output Language
+Write ALL natural-language output in English. This includes brandVoice, targetAudience, visualDirection, every rationale field, moodboardKeywords, competitorGaps, every concept/title/text inside directionSpecs (including copy rendered on the style sketches — buttons, nav items, headlines, body text, etc.), and every seoWcag narrative field (summary, issue descriptions, recommendations, opportunities).
+Keep JSON keys and enum values in English as defined by the schema — only the VALUES that are free-form prose should follow this language rule.`
+    : `## Output Language
+Kirjuta KOGU loomulik tekst eesti keeles. See hõlmab brandVoice, targetAudience, visualDirection, kõiki rationale välju, moodboardKeywords, competitorGaps, kõiki concept/title/text välju directionSpecs sees (sealhulgas stiilivisanditele renderdatud tekst — nupud, navigatsioon, pealkirjad, kehatekst jne) ning kõiki seoWcag narratiivseid välju (summary, issue kirjeldused, soovitused, võimalused).
+JSON võtmed ja enum-väärtused peavad jääma inglise keelde nagu skeem neid defineerib — ainult vabas vormis tekstiga VÄÄRTUSED peavad järgima seda keelereeglit.`
+  parts.push(languageInstruction)
+
   parts.push(`## Creative Brief\n${context.brief || 'No brief provided — infer from website data.'}`)
 
   const hasSite = !!context.scrapedSite

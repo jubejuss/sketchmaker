@@ -76,6 +76,7 @@ export interface SynthesisContext {
   competitors: CompetitorData[]
   competitorScope?: CompetitorScope
   sections?: PageSection[]           // ordered list of sections Claude should emit per direction
+  language?: OutputLanguage          // language Claude should use for narrative strings (concept, copy, etc.)
 }
 
 export interface StyleRecommendation {
@@ -177,6 +178,7 @@ export interface ReportData {
   synthesis: SynthesisResult
   seoWcag?: SeoWcagResult
   outputDir: string
+  language?: OutputLanguage
 }
 
 export type OutputMode = 'figma-execute' | 'paper-execute' | 'figma-prompt' | 'paper-prompt'
@@ -186,6 +188,7 @@ export interface MoodboardData {
   scrapedSite?: ScrapedSite
   projectName: string
   sections?: PageSection[]
+  language?: OutputLanguage
 }
 
 export type StepId = 'scrape' | 'research' | 'discover' | 'synthesize' | 'report' | 'moodboard'
@@ -243,10 +246,13 @@ export interface SavedProjectData {
 
 export type ImageSource = 'pexels' | 'openai'
 
+export type OutputLanguage = 'et' | 'en'
+
 export interface AppSettings {
   authMode: AuthMode
   researchMode: ResearchMode
   imageSource: ImageSource
+  outputLanguage: OutputLanguage
   anthropicApiKey: string
   ahrefsApiKey: string
   figmaAccessToken: string
