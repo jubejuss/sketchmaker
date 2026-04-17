@@ -32,6 +32,7 @@ interface StiilileidjaAPI {
     figmaError?: string; paperError?: string;
     figmaPort?: number | null; figmaClients?: number; figmaDaemonRunning?: boolean
   }>
+  probeFigmaImages: () => Promise<{ ok: boolean; result?: unknown; error?: string }>
   getSettings: () => Promise<import('../shared/types.js').AppSettings>
   saveSettings: (settings: Record<string, string>) => Promise<{ ok: boolean }>
   onSynthesisToken: (cb: (token: string) => void) => () => void

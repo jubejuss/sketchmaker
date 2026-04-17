@@ -73,17 +73,14 @@ async function main() {
     return str;
   }
 
-  // Image creation is now inline in renderImage — Bridge plugin's eval context
-  // rejects image hashes on detached nodes, so fills must be set after appendChild.
-  const IMAGE_CACHE = {};
-  function dataUrlToBytes(url) {
-    const commaIdx = url.indexOf(',');
-    const base64 = commaIdx >= 0 ? url.slice(commaIdx + 1) : '';
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return bytes;
-  }
+  // Image fills cannot be applied from this eval sandbox: createImageAsync
+  // returns a hash but the bytes never reach Figma's document-level image
+  // store, so rendering shows solid grey. Instead we collect nodeId + source
+  // (an absolute temp-file path, see image-gen.ts) and return it to the main
+  // process, which calls figma_set_image_fill. That MCP tool reads the file
+  // in the bridge server and uploads the bytes through its own handler,
+  // which runs in the main plugin context where images persist.
+  const __SL_IMG_REQUESTS = [];
 
   // ── Element renderer (recursive for frames) ────────────────────────────────
   async function renderElement(parent, el, direction) {
@@ -186,53 +183,20 @@ async function main() {
     r.y = el.y || 0;
     if (el.cornerRadius) r.cornerRadius = el.cornerRadius;
     if (el.rotation) r.rotation = el.rotation;
-    // Append to parent BEFORE setting image fill. Bridge plugin's SET_IMAGE_FILL
-    // always operates on live nodes (lookup via getNodeByIdAsync); detached nodes
-    // seem to reject image hashes with "Invalid SHA1 hash" in set_fills.
     parent.appendChild(r);
 
-    // NOTE: el.imageHash is our app-side dedup key (32-bit → base36), NOT a Figma
-    // SHA1 hash. Do not pass it to figma.set_fills. The only valid Figma image
-    // hash comes from figma.createImage(bytes).hash inside this sandbox.
-    let imageHash = null;
-    if (el.imageUrl) {
-      try {
-        if (IMAGE_CACHE[el.imageUrl]) {
-          imageHash = IMAGE_CACHE[el.imageUrl];
-        } else if (el.imageUrl.slice(0, 5) === 'data:') {
-          const bytes = dataUrlToBytes(el.imageUrl);
-          const image = figma.createImage(bytes);
-          imageHash = image.hash;
-          IMAGE_CACHE[el.imageUrl] = imageHash;
-          if (__SL_STATS.imgResolved === 0) {
-            console.log('[stiilileidja] first image hash:', imageHash, 'type:', typeof imageHash, 'len:', (imageHash || '').length);
-          }
-        } else {
-          const image = await figma.createImageAsync(el.imageUrl);
-          imageHash = image.hash;
-          IMAGE_CACHE[el.imageUrl] = imageHash;
-        }
-      } catch (e) {
-        console.warn('[stiilileidja] image create failed:', e && e.message, 'prefix:', el.imageUrl.slice(0, 60));
-        __SL_STATS.imgFailed++;
-      }
-    }
-
-    if (imageHash) {
-      try {
-        r.fills = [{ type: 'IMAGE', scaleMode: 'FILL', imageHash: imageHash }];
-        __SL_STATS.imgResolved++;
-        return r;
-      } catch (e) {
-        console.warn('[stiilileidja] set_fills failed, hash:', imageHash, 'err:', e && e.message);
-        __SL_STATS.imgFailed++;
-      }
-    } else if (!el.imageUrl) {
-      __SL_STATS.imgMissingUrl++;
-    }
-
-    // Placeholder: tinted box with caption
+    // Always start with a tinted placeholder fill; if imageUrl is present,
+    // record a request for the main process to overwrite it via the native
+    // figma_set_image_fill MCP tool after this script returns.
     r.fills = [solidFill('#C7C2BA', 1)];
+
+    if (el.imageUrl) {
+      __SL_IMG_REQUESTS.push({ nodeId: r.id, url: el.imageUrl });
+      __SL_STATS.imgResolved++;
+      return r;
+    }
+
+    __SL_STATS.imgMissingUrl++;
     if (el.imagePrompt) {
       try {
         const cap = figma.createText();
@@ -334,10 +298,11 @@ async function main() {
   }
 
   figma.viewport.scrollAndZoomIntoView([canvas]);
-  console.log('[stiilileidja] done. images:', __SL_STATS);
+  console.log('[stiilileidja] done. images:', __SL_STATS, 'pending fills:', __SL_IMG_REQUESTS.length);
+  return { stats: __SL_STATS, imgRequests: __SL_IMG_REQUESTS };
 }
 
-await main();
+return await main();
 `.trim()
 }
 

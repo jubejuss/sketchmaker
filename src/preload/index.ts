@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('stiilileidja', {
   checkMcpStatus: () =>
     ipcRenderer.invoke('check-mcp-status'),
 
+  probeFigmaImages: () =>
+    ipcRenderer.invoke('probe-figma-images'),
+
   getSettings: () =>
     ipcRenderer.invoke('get-settings'),
 

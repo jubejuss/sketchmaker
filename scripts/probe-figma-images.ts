@@ -17,6 +17,9 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import crypto from 'node:crypto'
+
+const STORE_ENCRYPTION_KEY = 'stiilileidja-v1' // must match src/main/store.ts
 
 const FIGMA_MCP_PATH = '/Users/juhokalberg/.nvm/versions/node/v20.19.2/lib/node_modules/figma-console-mcp/dist/local.js'
 const NODE_BIN = '/Users/juhokalberg/.nvm/versions/node/v20.19.2/bin/node'
@@ -24,21 +27,71 @@ const NODE_BIN = '/Users/juhokalberg/.nvm/versions/node/v20.19.2/bin/node'
 // 1×1 red JPEG — smallest reasonable payload that's actually a valid image.
 const TINY_JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAr/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/AP/Z'
 
+/**
+ * Replicates conf's (electron-store's) decryption: [16-byte IV][ciphertext]
+ * with AES-256-CBC and pbkdf2(key, iv-as-string, 10000, 32, sha512).
+ */
+function decryptStore(raw: Buffer): string {
+  // Mirrors conf's scheme: [16-byte IV][1-byte separator][ciphertext], AES-256-CBC,
+  // pbkdf2(key, iv-as-string, 10_000, 32, sha512).
+  const iv = raw.subarray(0, 16)
+  const password = crypto.pbkdf2Sync(STORE_ENCRYPTION_KEY, iv.toString(), 10000, 32, 'sha512')
+  const decipher = crypto.createDecipheriv('aes-256-cbc', password, iv)
+  return Buffer.concat([decipher.update(raw.subarray(17)), decipher.final()]).toString('utf8')
+}
+
 function getToken(): string {
   if (process.env.FIGMA_ACCESS_TOKEN) return process.env.FIGMA_ACCESS_TOKEN
 
   const configPath = path.join(os.homedir(), 'Library/Application Support/stiilileidja/config.json')
   try {
-    const raw = fs.readFileSync(configPath, 'utf8')
-    const cfg = JSON.parse(raw) as { figmaAccessToken?: string }
+    const raw = fs.readFileSync(configPath)
+    let json: string
+    try {
+      json = decryptStore(raw)
+    } catch {
+      json = raw.toString('utf8') // fall through in case the file is plaintext
+    }
+    const cfg = JSON.parse(json) as { figmaAccessToken?: string }
     if (cfg.figmaAccessToken) return cfg.figmaAccessToken
-  } catch {}
+  } catch (err) {
+    console.error('Could not read stiilileidja config:', (err as Error).message)
+  }
 
   console.error('No token. Set FIGMA_ACCESS_TOKEN or configure one in the app first.')
   process.exit(1)
 }
 
+function preflight(): void {
+  const existing: number[] = []
+  try {
+    for (const f of fs.readdirSync('/tmp')) {
+      const m = f.match(/^figma-console-mcp-(\d+)\.json$/)
+      if (!m) continue
+      try {
+        const raw = fs.readFileSync(`/tmp/${f}`, 'utf8')
+        const data = JSON.parse(raw) as { pid?: number }
+        if (typeof data.pid === 'number') {
+          try { process.kill(data.pid, 0); existing.push(parseInt(m[1], 10)) } catch {}
+        }
+      } catch {}
+    }
+  } catch {}
+
+  if (existing.length > 0) {
+    console.error(`\n⚠️  Another figma-console-mcp daemon is already running on port(s) ${existing.join(', ')}.`)
+    console.error('The Figma Desktop Bridge plugin scans ports ONCE at startup, so it is')
+    console.error('currently bound to that daemon — our probe\'s daemon would be isolated.\n')
+    console.error('Fix:')
+    console.error('  1. Stop the running Stiilileidja dev server (Ctrl+C in the npm run dev terminal)')
+    console.error('  2. In Figma: close the "Figma Desktop Bridge" plugin, then reopen it')
+    console.error('  3. Rerun: npm run probe:images\n')
+    process.exit(1)
+  }
+}
+
 async function main() {
+  preflight()
   const token = getToken()
 
   const transport = new StdioClientTransport({

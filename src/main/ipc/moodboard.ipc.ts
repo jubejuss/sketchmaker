@@ -2,7 +2,7 @@ import { ipcMain, BrowserWindow, shell } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
-import { checkFigmaAvailable, executeFigmaMoodboard, getFigmaStatus } from '../services/mcp-figma.js'
+import { checkFigmaAvailable, executeFigmaMoodboard, getFigmaStatus, probeFigmaImages } from '../services/mcp-figma.js'
 import { checkPaperAvailable, executePaperMoodboard } from '../services/mcp-paper.js'
 import { buildPrompt } from '../services/prompt-builder.js'
 import store from '../store.js'
@@ -23,6 +23,15 @@ export function registerMoodboardIpc(mainWindow: BrowserWindow): void {
       figmaPort: figmaStatus.port,
       figmaClients: figmaStatus.clients,
       figmaDaemonRunning: figmaStatus.running
+    }
+  })
+
+  ipcMain.handle('probe-figma-images', async () => {
+    try {
+      const result = await probeFigmaImages()
+      return { ok: true, result }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
     }
   })
 

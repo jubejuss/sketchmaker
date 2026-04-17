@@ -1,5 +1,35 @@
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import crypto from 'node:crypto'
 import type { DirectionSpec, ImageSource, VisualElement } from '../../shared/types.js'
 import { pickOrientation, searchPexelsImage } from './pexels.js'
+
+const TEMP_DIR = path.join(os.tmpdir(), 'stiilileidja-images')
+
+function ensureTempDir(): void {
+  fs.mkdirSync(TEMP_DIR, { recursive: true })
+}
+
+function tempFilePath(prompt: string, ext: string): string {
+  const hash = crypto.createHash('sha1').update(prompt).digest('hex').slice(0, 16)
+  return path.join(TEMP_DIR, `${hash}.${ext}`)
+}
+
+function extensionFromMime(mime: string): string {
+  if (mime.includes('png')) return 'png'
+  if (mime.includes('webp')) return 'webp'
+  return 'jpg'
+}
+
+export function cleanupImageTempFiles(): void {
+  try {
+    if (!fs.existsSync(TEMP_DIR)) return
+    for (const f of fs.readdirSync(TEMP_DIR)) {
+      try { fs.unlinkSync(path.join(TEMP_DIR, f)) } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
+}
 
 export interface ImageProviderKeys {
   openaiApiKey: string
@@ -72,7 +102,24 @@ export async function generateImagesForDirections(
 
 async function fetchPexels(apiKey: string, ref: ImagePromptRef): Promise<string | null> {
   const orientation = pickOrientation(ref.element.w, ref.element.h)
-  return searchPexelsImage(apiKey, ref.prompt, orientation, hashString(ref.prompt))
+  const url = await searchPexelsImage(apiKey, ref.prompt, orientation, hashString(ref.prompt))
+  if (!url) return null
+  // Download to a temp file and return the absolute path. figma_set_image_fill
+  // accepts absolute file paths (starting with '/') and reads them from disk —
+  // this avoids MCP stdio param truncation that silently breaks base64 payloads
+  // above ~100 KB, and keeps the figma_execute script small.
+  return downloadToTempFile(url, ref.prompt)
+}
+
+async function downloadToTempFile(url: string, keySeed: string): Promise<string | null> {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Image download ${res.status} for ${url.slice(0, 80)}`)
+  const mime = res.headers.get('content-type') || 'image/jpeg'
+  const buf = Buffer.from(await res.arrayBuffer())
+  ensureTempDir()
+  const filePath = tempFilePath(keySeed, extensionFromMime(mime))
+  fs.writeFileSync(filePath, buf)
+  return filePath
 }
 
 async function fetchOpenAI(apiKey: string, ref: ImagePromptRef): Promise<string | null> {
@@ -99,8 +146,13 @@ async function fetchOpenAI(apiKey: string, ref: ImagePromptRef): Promise<string 
   const json = await res.json() as { data?: Array<{ b64_json?: string; url?: string }> }
   const item = json.data?.[0]
   if (!item) throw new Error('OpenAI returned no image data')
-  if (item.b64_json) return `data:image/png;base64,${item.b64_json}`
-  if (item.url) return item.url
+  if (item.b64_json) {
+    ensureTempDir()
+    const filePath = tempFilePath(ref.prompt, 'png')
+    fs.writeFileSync(filePath, Buffer.from(item.b64_json, 'base64'))
+    return filePath
+  }
+  if (item.url) return downloadToTempFile(item.url, ref.prompt)
   throw new Error('OpenAI response missing image')
 }
 

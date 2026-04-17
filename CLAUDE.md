@@ -19,8 +19,8 @@ Desktop tool for designers. Given a client website URL or creative brief, it:
 - **Playwright-core** for website scraping (Chromium auto-installs on first run to userData)
 - **node-vibrant** for color extraction from screenshots
 - **Anthropic SDK** (`claude-sonnet-4-6`, streaming, `maxRetries: 0`)
-- **Pexels REST API v1** — default image source; returns https URLs (no payload bloat, renders via `createImageAsync`). 200 req/hr free tier.
-- **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — alternative when user needs AI-generated scenes. Returns base64 → embedded as data URLs in figma_execute script (~3 MB per image, so 15 images = ~45 MB script).
+- **Pexels REST API v1** — default image source; 200 req/hr free tier. Images downloaded to a temp file before handoff to Figma (see Image Fetching).
+- **OpenAI Images API** (`gpt-image-1`, `quality: medium`) — alternative when user needs AI-generated scenes. Returns base64 PNG → written to a temp file before handoff to Figma.
 - **jsonrepair** — fallback for malformed synthesis JSON (unescaped quotes/newlines in long outputs)
 - **figma-console-mcp** (local, StdioClientTransport) for Figma integration
 - **Paper MCP binary** for Pencil/Paper integration
@@ -131,25 +131,36 @@ Single Claude call does everything (`src/main/services/claude.ts`):
 
 ## Image Fetching
 
-`src/main/services/image-gen.ts` walks every `directionSpec.sections[].elements` tree (recursing into `frame` children), collects elements where `kind === 'image' && imagePrompt && !imageUrl`, and dispatches to one of two providers based on the `imageSource` setting:
+`src/main/services/image-gen.ts` walks every `directionSpec.sections[].elements` tree (recursing into `frame` children), collects elements where `kind === 'image' && imagePrompt && !imageUrl`, and dispatches to one of two providers based on the `imageSource` setting. Both providers write the bytes to `$TMPDIR/stiilileidja-images/<sha1(prompt).slice(0,16)>.<ext>` and stash the **absolute file path** on `element.imageUrl` — Figma rendering consumes file paths, not https URLs or data URLs (see "Figma image fill handoff" below).
 
 **Pexels** (`source: 'pexels'`, default):
 - `GET https://api.pexels.com/v1/search?query=X&per_page=15&orientation=landscape|portrait|square&size=large` with `Authorization: <key>` header
 - Orientation picked from element aspect ratio: `>1.3` landscape, `<0.77` portrait, else square
 - Photo index picked deterministically via `hashString(prompt) % 15` so reruns with the same prompt stay stable
-- Returns the `src.large` https URL (~940px long edge) — stored directly on `element.imageUrl`
+- Resolved `src.large` URL (~940px long edge) is downloaded and cached to a temp file; absolute path stored on `element.imageUrl`
 - Prompts are passed raw (no enrichment) because Pexels search responds better to concrete keywords than stylistic phrasing
 
 **OpenAI** (`source: 'openai'`):
 - `POST /v1/images/generations` with `model: 'gpt-image-1'`, `quality: 'medium'`, `n: 1`
 - Size from aspect ratio: `1024×1024`, `1536×1024`, or `1024×1536`
 - Prompt enriched with direction's concept + palette + mood for on-brand results
-- Returns base64 PNG → stashed as `data:image/png;base64,…` URL on `element.imageUrl`
+- Returned `b64_json` PNG is written directly to a temp file; if the response returns `url` instead, that URL is downloaded. Absolute path stored on `element.imageUrl`
 - Requires OpenAI **organisation** verification AND **project** Allowed models to include `gpt-image-1`. If all requests return `403 model_not_found`, go to platform.openai.com → Settings → Project → Limits → Allowed models and add `gpt-image-1`.
 
-Both paths: concurrency capped at 3, per-image progress reported via `synthesis:image-progress`.
+Both paths: concurrency capped at 3, per-image progress reported via `synthesis:image-progress`. The temp dir is wiped after the moodboard finishes by `cleanupImageTempFiles()`.
 
-**Note on `element.imageHash`**: this field is an app-side cache key (32-bit → base36), NOT a Figma SHA1 hash. Do not pass it to `figma.set_fills` — the Figma image hash is obtained inside the plugin via `figma.createImage(bytes).hash` or `(await figma.createImageAsync(url)).hash`. The misnamed field is essentially dead but kept for backward compatibility with saved projects.
+## Figma image fill handoff
+
+Image fills **cannot** be applied from inside `figma_execute`'s eval sandbox — `figma.createImage(bytes)` returns a hash but the bytes never reach Figma's document-level image store, so the rectangle renders solid grey. `figma.createImageAsync(httpsUrl)` is blocked by the Desktop Bridge plugin's `manifest.json` allowedDomains. `atob` is undefined in the sandbox.
+
+The working flow:
+1. `figma-script.ts` creates rectangles with a grey placeholder fill and collects `{ nodeId, url }` into `__SL_IMG_REQUESTS` (where `url` is the absolute temp file path).
+2. Script returns the list to the main process.
+3. `mcp-figma.ts` groups requests by source (same image → one MCP call, multiple nodeIds), then calls `figma_set_image_fill` with the file path as `imageData`. The MCP server reads the file from disk in its own handler — running in the persistent plugin context where images persist — and applies the fill.
+
+`figma_set_image_fill`'s `imageData` parameter accepts absolute paths starting with `/` OR raw base64 (no `data:` prefix). File paths are preferred because MCP stdio truncates large base64 params silently (fails above ~100 KB).
+
+**Note on `element.imageHash`**: this field is a legacy app-side cache key (32-bit → base36), NOT a Figma SHA1 hash. It is no longer used anywhere but kept in the type for backward compatibility with saved projects. The real Figma hash comes from `figma_set_image_fill` in the server, not from the eval sandbox.
 
 ## Pipeline Steps
 
@@ -196,9 +207,9 @@ These invariants are enforced across `claude.ts`, `figma-script.ts`, and `image-
 - **Font loading order**: fonts must be loaded *after* `figma.currentPage = page`, never before. Fonts loaded before page-context change silently fail and text nodes render blank. This is hard to debug — respect the rule.
 - **Fonts + layouts come from Claude**, not from direction index. `styleSketchPrompts[i].typography` and `layoutRecipe` drive rendering. The P/Z/D renderer libraries (if ever introduced) are neutral building blocks — Claude's recipe selects which to use per section.
 - **Concept output must be rich mockups**, not simple brand cards — nav + hero + cards + footer per direction, each visually distinct enough to communicate the design attitude to a client.
-- **Image decoding**: data URLs must be decoded in-plugin with `atob` → `Uint8Array` → `figma.createImage(bytes)`. Do not pass data URLs to `figma.createImageAsync()` — it only accepts https URLs.
-- **Image fill ordering in `renderImage`**: append the rectangle to its parent *before* setting `r.fills = [{ type: 'IMAGE', imageHash }]`. The Bridge plugin's sandbox rejects image-fill writes to detached nodes with "Invalid SHA1 hash".
-- **`element.imageHash` is app-side, not Figma**: never forward it to `figma.set_fills`. The real Figma hash always comes from `figma.createImage(bytes).hash` inside the plugin sandbox.
+- **Image fills go through `figma_set_image_fill`, not `figma_execute`**. Inside the eval sandbox, `figma.createImage(bytes)` returns a hash but the bytes don't persist to Figma's document image store — the fill renders grey. `renderImage` in `figma-script.ts` applies a grey placeholder and queues `{ nodeId, url }` into `__SL_IMG_REQUESTS`; the main process then applies real fills via the MCP tool.
+- **Image sources are absolute file paths**, not https URLs or data URLs. `image-gen.ts` writes every fetched image to `$TMPDIR/stiilileidja-images/` and stores the absolute path on `element.imageUrl`. MCP stdio silently truncates large base64 params (> ~100 KB), so file paths are the only reliable path for pipeline images.
+- **`element.imageHash` is dead**: app-side legacy cache key, never a Figma SHA1 hash. Do not pass it anywhere — the real Figma hash is produced by `figma_set_image_fill` in the MCP server, not in the sandbox.
 
 ## Figma MCP Daemon Lifecycle
 

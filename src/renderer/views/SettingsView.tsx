@@ -31,6 +31,8 @@ export default function SettingsView(): React.ReactElement {
     figmaPort?: number | null; figmaClients?: number; figmaDaemonRunning?: boolean
   } | null>(null)
   const [mcpTesting, setMcpTesting] = useState(false)
+  const [probeRunning, setProbeRunning] = useState(false)
+  const [probeResult, setProbeResult] = useState<{ ok: boolean; result?: unknown; error?: string } | null>(null)
 
   useEffect(() => {
     if (!window.stiilileidja) { setLoading(false); return }
@@ -59,6 +61,20 @@ export default function SettingsView(): React.ReactElement {
       setMcpStatus(result)
     } finally {
       setMcpTesting(false)
+    }
+  }
+
+  async function runImageProbe(): Promise<void> {
+    if (!window.stiilileidja) return
+    setProbeRunning(true)
+    setProbeResult(null)
+    try {
+      const result = await window.stiilileidja.probeFigmaImages()
+      setProbeResult(result)
+    } catch (err) {
+      setProbeResult({ ok: false, error: (err as Error).message })
+    } finally {
+      setProbeRunning(false)
     }
   }
 
@@ -391,6 +407,53 @@ export default function SettingsView(): React.ReactElement {
                 )}
               </div>
             </div>
+          )}
+        </div>
+
+        {/* Figma image API probe (debug) */}
+        <div>
+          <div style={{
+            fontFamily: 'var(--display)', fontSize: 13, fontWeight: 600,
+            color: 'var(--text-primary)', marginBottom: 4
+          }}>
+            Figma image API proov (debug)
+          </div>
+          <div style={{ fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+            Testib, milliseid Figma image API-sid Bridge plugin toetab. Nõuab, et MCP ühendus oleks aktiivne.
+          </div>
+          <button
+            onClick={runImageProbe}
+            disabled={probeRunning}
+            style={{
+              padding: '8px 18px',
+              background: 'transparent',
+              border: '1px solid var(--border-active)',
+              borderRadius: 7,
+              fontFamily: 'var(--mono)', fontSize: 11,
+              color: 'var(--accent)',
+              cursor: probeRunning ? 'not-allowed' : 'pointer',
+              outline: 'none', opacity: probeRunning ? 0.6 : 1
+            }}
+          >
+            {probeRunning ? 'Jooksutan...' : 'Proovi Figma image API-sid'}
+          </button>
+          {probeResult && (
+            <pre style={{
+              marginTop: 12,
+              padding: '12px 14px',
+              background: probeResult.ok ? 'rgba(90,158,122,0.06)' : 'rgba(192,80,74,0.06)',
+              border: `1px solid ${probeResult.ok ? 'rgba(90,158,122,0.25)' : 'rgba(192,80,74,0.25)'}`,
+              borderRadius: 7,
+              fontFamily: 'var(--mono)', fontSize: 10,
+              color: 'var(--text-primary)',
+              lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: 480,
+              overflow: 'auto'
+            }}>
+              {JSON.stringify(probeResult, null, 2)}
+            </pre>
           )}
         </div>
 
