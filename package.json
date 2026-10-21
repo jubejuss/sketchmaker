@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@modelcontextprotocol/sdk": "^1.10.0",
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "electron-store": "^10.0.0",
     "jsonrepair": "^3.14.0",
     "node-vibrant": "^4.0.3",
